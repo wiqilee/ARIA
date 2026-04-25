@@ -122,3 +122,7 @@ pnpm-debug.log*
 dist/
 build/
 *.egg-info/
+# Python virtual environments at root level
+.venv/
+venv/
+env/
