@@ -11,7 +11,7 @@
 [![Python](https://img.shields.io/badge/Python-Agent_Layer-blue?logo=python)](https://www.python.org/)
 [![Google Cloud Run](https://img.shields.io/badge/Google_Cloud-Run_asia--southeast2-4285F4?logo=googlecloud)](https://cloud.google.com/run)
 [![Gemini](https://img.shields.io/badge/Gemini-2.5_Pro-8E75B2?logo=googlegemini)](https://deepmind.google/technologies/gemini/)
-[![Vercel](https://img.shields.io/badge/Deployed_on-Vercel-black?logo=vercel)](https://aria-dqx7.vercel.app/)
+[![Vercel](https://img.shields.io/badge/Deployed_on-Vercel-black?logo=vercel)](https://aria-polypharmacy.vercel.app/)
 [![Prompt Opinion](https://img.shields.io/badge/Prompt_Opinion-Marketplace-green)](https://app.promptopinion.ai)
 
 [![Medium](https://img.shields.io/badge/Read_on-Medium-black?logo=medium)](https://medium.com/@YOUR_MEDIUM_HANDLE)
