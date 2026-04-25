@@ -961,9 +961,13 @@ function VizSidePanel({
         animate={{ opacity: 1, x: 0 }}
         exit={{ opacity: 0, x: 8 }}
         transition={{ duration: 0.2, ease: "easeOut" }}
-        className="absolute top-3 right-3 rounded-lg p-3"
+        // On desktop the panel sits in the top-right corner with a fixed
+        // 260px width. On mobile (< sm = 640px) the panel anchors to the
+        // bottom of the canvas and spans the full width minus a small gutter,
+        // so it doesn't cover the graph it's describing. The Tailwind utilities
+        // here flip both the position and the sizing at the breakpoint.
+        className="absolute left-3 right-3 bottom-3 sm:left-auto sm:right-3 sm:top-3 sm:bottom-auto rounded-lg p-3 w-auto sm:w-[260px]"
         style={{
-          width: 260,
           maxHeight: "calc(100% - 24px)",
           overflowY: "auto",
           background: "rgba(6,14,31,0.94)",
@@ -1780,7 +1784,25 @@ export default function ReportPage() {
     { key: "waterfall" as const, label: "Deprescribing", icon: "💊", available: !!effectiveDeprescribing },
   ];
 
-  const canvasHeight = activeViz === "radar" ? 520 : 420;
+  // Canvas height is responsive: on desktop the side panel sits in the
+  // top-right corner so we use the original heights. On mobile the panel
+  // anchors to the bottom of the canvas, so we add extra height to give
+  // the 3D viz room above the panel without it being squashed. The mobile
+  // height is detected via window width on mount + resize; the SSR fallback
+  // is the desktop value to avoid layout shift on first paint for desktop
+  // users.
+  const [isMobileViewport, setIsMobileViewport] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const mq = window.matchMedia("(max-width: 639px)");
+    const update = () => setIsMobileViewport(mq.matches);
+    update();
+    mq.addEventListener("change", update);
+    return () => mq.removeEventListener("change", update);
+  }, []);
+  const canvasHeight = activeViz === "radar"
+    ? (isMobileViewport ? 600 : 520)
+    : (isMobileViewport ? 500 : 420);
 
   // Build structured patient summary. If the backend provides a
   // pre-written summary string, use it as the headline and leave bullets
@@ -2153,17 +2175,23 @@ export default function ReportPage() {
             {/* Patient Summary — hover glow, aligned border */}
             <HoverCard delay={0.2}>
               <h3 className="font-display font-semibold text-xs uppercase tracking-wider mb-3" style={{ color: "var(--primary)" }}>Patient Summary</h3>
-              <div className="flex gap-4 items-stretch">
-                {/* 3D Body — fixed height anchors the card; right column stretches to match */}
-                <div className="w-28 flex-shrink-0 rounded-lg overflow-hidden self-stretch min-h-[220px]" style={{ border: "1px solid rgba(6,182,212,0.25)", background: "rgba(2,8,23,0.9)" }}>
+              {/* Mobile: stack vertically with the 3D body centered above the
+                  text content. Desktop (≥ sm): the original side-by-side
+                  layout with the body on the left and content on the right. */}
+              <div className="flex flex-col items-center sm:flex-row sm:items-stretch gap-4">
+                {/* 3D Body — on mobile, narrower (w-32 = 128px) and centered
+                    via the parent's items-center; on desktop reverts to the
+                    original w-28 anchor with self-stretch so the right column
+                    matches its height. */}
+                <div className="w-32 sm:w-28 flex-shrink-0 rounded-lg overflow-hidden sm:self-stretch min-h-[220px]" style={{ border: "1px solid rgba(6,182,212,0.25)", background: "rgba(2,8,23,0.9)" }}>
                   <Scene camera={{ position: [0, 0, 3.5], fov: 45 }}>
                     <PatientAvatar3D sex={(patientCtx as any).sex || "unknown"} />
                   </Scene>
                 </div>
                 {/* Right column — flex-col so content distributes across the
-                    card's height. The outer container stretches to match the
-                    3D body height (min-h-[220px]), keeping the card balanced. */}
-                <div className="flex-1 min-w-0 flex flex-col">
+                    card's height on desktop. On mobile w-full so the text is
+                    full-width below the centered body. */}
+                <div className="w-full sm:flex-1 sm:min-w-0 flex flex-col">
                   {/* Headline */}
                   <p className="text-sm leading-relaxed mb-2.5" style={{ color: "#eaf0fa" }}>
                     {patientSummary.headline}
