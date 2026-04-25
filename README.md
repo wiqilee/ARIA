@@ -3,7 +3,6 @@
 # ARIA
 ### Adaptive Risk Intelligence for Polypharmacy Assessment
 
-**Repository:** [github.com/wiqilee/ARIA](https://github.com/wiqilee/ARIA)
 
 **An AI agent system that does not just detect drug interactions. It reasons about them.**
 
