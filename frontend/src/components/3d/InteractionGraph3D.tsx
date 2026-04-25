@@ -47,8 +47,27 @@ export function InteractionGraph3D({
   onEdgeClick,
 }: InteractionGraph3DProps) {
   const [hoveredNode, setHoveredNode] = useState<string | null>(null);
+  // On touch devices, hover via onPointerOver fires only momentarily during a
+  // tap, so we keep an explicit "locked" node that stays selected until the
+  // user taps it again or taps the empty canvas. On mouse devices we never
+  // touch this state and the original hover behavior is preserved.
+  const [lockedNode, setLockedNode] = useState<string | null>(null);
+  const [isTouchDevice, setIsTouchDevice] = useState(false);
   const groupRef = useRef<THREE.Group>(null);
   const [, forceUpdate] = useState(0);
+
+  // Detect coarse pointers (mobile / tablet). We check on mount only because
+  // the device class doesn't change mid-session.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const mq = window.matchMedia("(hover: none), (pointer: coarse)");
+    setIsTouchDevice(mq.matches);
+  }, []);
+
+  // The "active" node is whichever the user has locked on touch, falling back
+  // to the hovered node on mouse devices. This single value drives the side
+  // panel emission, the highlight ring, and edge highlighting.
+  const activeNode = lockedNode ?? hoveredNode;
 
   const nodes = data?.nodes ?? [];
   const edges = data?.edges ?? [];
@@ -138,35 +157,35 @@ export function InteractionGraph3D({
     }
   });
 
-  // Emit hover payload whenever the hovered node changes. The parent's
-  // side panel renders the rich details — no more click-to-select.
+  // Emit payload whenever the active node changes (locked on touch, hovered
+  // on mouse). The parent's side panel renders the rich details.
   useEffect(() => {
     if (!onNodeHover) return;
-    if (hoveredNode === null) {
+    if (activeNode === null) {
       onNodeHover(null);
       return;
     }
-    const node = nodes.find((n) => n.drug_name === hoveredNode);
+    const node = nodes.find((n) => n.drug_name === activeNode);
     const sevRank: Record<Severity, number> = { low: 1, moderate: 2, high: 3, critical: 4 };
     const connected: NodeClickPayload["connected"] = [];
     let worst: Severity | null = null;
     for (const e of edges) {
-      if (e.source === hoveredNode || e.target === hoveredNode) {
-        const other = e.source === hoveredNode ? e.target : e.source;
+      if (e.source === activeNode || e.target === activeNode) {
+        const other = e.source === activeNode ? e.target : e.source;
         connected.push({ drug: other, severity: e.severity, type: e.interaction_type });
         if (!worst || sevRank[e.severity] > sevRank[worst]) worst = e.severity;
       }
     }
     connected.sort((a, b) => sevRank[b.severity] - sevRank[a.severity]);
     onNodeHover({
-      drug_name: hoveredNode,
+      drug_name: activeNode,
       is_hub: node?.is_hub ?? false,
       degree: node?.degree ?? connected.length,
       hub_score: node?.hub_score ?? 0,
       connected,
       worst_severity: worst,
     });
-  }, [hoveredNode, nodes, edges, onNodeHover]);
+  }, [activeNode, nodes, edges, onNodeHover]);
 
   if (nodes.length === 0) {
     return <group><EmptyGraph /></group>;
@@ -183,6 +202,16 @@ export function InteractionGraph3D({
         maxPolarAngle={Math.PI * 0.85}
         minPolarAngle={Math.PI * 0.15}
       />
+      {/* On touch devices, tapping the empty canvas (anything that isn't a
+          node) clears the lock. We attach this to a large invisible plane
+          behind everything so it catches missed taps without blocking
+          OrbitControls. */}
+      {isTouchDevice && (
+        <mesh position={[0, 0, -8]} onPointerDown={() => setLockedNode(null)}>
+          <planeGeometry args={[40, 40]} />
+          <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+        </mesh>
+      )}
       <group ref={groupRef}>
         <pointLight position={[0, 0, 2]} intensity={0.3} color="#06b6d4" distance={6} />
 
@@ -192,7 +221,7 @@ export function InteractionGraph3D({
           if (!a || !b) return null;
           const color = SEVERITY_COLORS[edge.severity] || "#1e3a5f";
           const lineWidth = 1 + (edge.weight || 0) * 2;
-          const isHighlighted = hoveredNode === edge.source || hoveredNode === edge.target;
+          const isHighlighted = activeNode === edge.source || activeNode === edge.target;
           return (
             <EdgeLine key={`e-${i}`} a={a} b={b} color={color} lineWidth={lineWidth} highlighted={isHighlighted}
               onClick={() => onEdgeClick?.(edge.source, edge.target)} />
@@ -207,8 +236,15 @@ export function InteractionGraph3D({
 
         {nodePositions.map((node) => (
           <DrugNode key={node.drug_name} node={node}
-            isHovered={hoveredNode === node.drug_name}
-            onHover={setHoveredNode} />
+            isHovered={activeNode === node.drug_name}
+            isTouchDevice={isTouchDevice}
+            isLocked={lockedNode === node.drug_name}
+            onHover={setHoveredNode}
+            onTap={(name) => {
+              // Toggle lock: tapping the same node again unlocks it; tapping
+              // a different node moves the lock there.
+              setLockedNode((curr) => (curr === name ? null : name));
+            }} />
         ))}
       </group>
     </>
@@ -239,9 +275,12 @@ function EmptyGraph() {
   );
 }
 
-function DrugNode({ node, isHovered, onHover }: {
+function DrugNode({ node, isHovered, isTouchDevice, isLocked, onHover, onTap }: {
   node: NodePosition; isHovered: boolean;
+  isTouchDevice: boolean;
+  isLocked: boolean;
   onHover: (name: string | null) => void;
+  onTap: (name: string) => void;
 }) {
   const meshRef = useRef<THREE.Mesh>(null);
   const glowRef = useRef<THREE.Mesh>(null);
@@ -266,17 +305,27 @@ function DrugNode({ node, isHovered, onHover }: {
           <meshStandardMaterial color={color} transparent opacity={0.08} side={THREE.BackSide} />
         </mesh>
       )}
-      {/* Hover ring indicator */}
+      {/* Active highlight ring — shown when hovered (mouse) or locked (touch).
+          Locked rings are thicker and stay visible to communicate persistence. */}
       {isHovered && (
         <mesh position={node.pos} rotation={[Math.PI / 2, 0, 0]}>
-          <ringGeometry args={[baseSize + 0.1, baseSize + 0.16, 32]} />
-          <meshBasicMaterial color="#ffffff" transparent opacity={0.7} />
+          <ringGeometry args={[baseSize + 0.1, baseSize + (isLocked ? 0.22 : 0.16), 32]} />
+          <meshBasicMaterial color="#ffffff" transparent opacity={isLocked ? 0.9 : 0.7} />
         </mesh>
       )}
-      {/* The node sphere itself — pointer events drive hover */}
+      {/* The node sphere itself — pointer events drive hover (mouse) or tap
+          (touch). On touch devices we suppress onPointerOver/Out because they
+          fire only briefly during a tap and would race with the lock state. */}
       <mesh ref={meshRef} position={node.pos}
-        onPointerOver={(e: ThreeEvent<PointerEvent>) => { e.stopPropagation(); onHover(node.drug_name); }}
-        onPointerOut={() => onHover(null)}>
+        onPointerOver={isTouchDevice
+          ? undefined
+          : (e: ThreeEvent<PointerEvent>) => { e.stopPropagation(); onHover(node.drug_name); }}
+        onPointerOut={isTouchDevice
+          ? undefined
+          : () => onHover(null)}
+        onPointerDown={isTouchDevice
+          ? (e: ThreeEvent<PointerEvent>) => { e.stopPropagation(); onTap(node.drug_name); }
+          : undefined}>
         <sphereGeometry args={[size, 32, 32]} />
         <meshStandardMaterial color={color} emissive={color}
           emissiveIntensity={isHovered ? 0.9 : 0.4}
@@ -321,18 +370,6 @@ function EdgeLine({ a, b, color, lineWidth, highlighted, onClick }: {
 
 function TriangleConnector({ nodes }: { nodes: NodePosition[] }) {
   const meshRef = useRef<THREE.Mesh>(null);
-
-  // Pre-create geometry with a placeholder position attribute so TypeScript
-  // is happy and the mesh has something to render before useFrame fills it.
-  const geometry = useMemo(() => {
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute(
-      "position",
-      new THREE.BufferAttribute(new Float32Array(9), 3),
-    );
-    return geo;
-  }, []);
-
   useFrame(() => {
     if (meshRef.current && nodes.length >= 3) {
       const geo = meshRef.current.geometry as THREE.BufferGeometry;
@@ -346,7 +383,8 @@ function TriangleConnector({ nodes }: { nodes: NodePosition[] }) {
     }
   });
   return (
-    <mesh ref={meshRef} geometry={geometry}>
+    <mesh ref={meshRef}>
+      <bufferGeometry />
       <meshBasicMaterial color="#7c4dff" transparent opacity={0.12} side={THREE.DoubleSide} />
     </mesh>
   );
