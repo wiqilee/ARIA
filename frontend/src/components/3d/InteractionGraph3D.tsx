@@ -321,6 +321,18 @@ function EdgeLine({ a, b, color, lineWidth, highlighted, onClick }: {
 
 function TriangleConnector({ nodes }: { nodes: NodePosition[] }) {
   const meshRef = useRef<THREE.Mesh>(null);
+
+  // Pre-create geometry with a placeholder position attribute so TypeScript
+  // is happy and the mesh has something to render before useFrame fills it.
+  const geometry = useMemo(() => {
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute(
+      "position",
+      new THREE.BufferAttribute(new Float32Array(9), 3),
+    );
+    return geo;
+  }, []);
+
   useFrame(() => {
     if (meshRef.current && nodes.length >= 3) {
       const geo = meshRef.current.geometry as THREE.BufferGeometry;
@@ -334,8 +346,7 @@ function TriangleConnector({ nodes }: { nodes: NodePosition[] }) {
     }
   });
   return (
-    <mesh ref={meshRef}>
-      <bufferGeometry />
+    <mesh ref={meshRef} geometry={geometry}>
       <meshBasicMaterial color="#7c4dff" transparent opacity={0.12} side={THREE.DoubleSide} />
     </mesh>
   );

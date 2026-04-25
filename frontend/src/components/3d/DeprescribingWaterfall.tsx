@@ -41,6 +41,14 @@ export function DeprescribingWaterfall({
 
   const steps = data?.steps ?? [];
 
+  // ALL hooks must be called unconditionally, BEFORE any early return,
+  // to satisfy the Rules of Hooks. The animation tick runs even when
+  // there are no steps — it's cheap and avoids hook-order violations.
+  useFrame(({ clock }) => {
+    const t = Math.min(clock.getElapsedTime() * 0.3, 1);
+    setAnimProgress(t);
+  });
+
   if (steps.length === 0) {
     return (
       <group>
@@ -56,11 +64,6 @@ export function DeprescribingWaterfall({
     ...steps.map((s) => s.expected_risk_reduction ?? 0),
     1,
   );
-
-  useFrame(({ clock }) => {
-    const t = Math.min(clock.getElapsedTime() * 0.3, 1);
-    setAnimProgress(t);
-  });
 
   const totalHeight = steps.length * (barHeight + barGap);
   const startY = totalHeight / 2;
@@ -206,7 +209,7 @@ export function DeprescribingWaterfall({
       {/* Warnings */}
       {animProgress > 0.95 && (data?.warnings ?? []).length > 0 && (
         <group>
-          {data.warnings.map((w, i) => (
+          {(data?.warnings ?? []).map((w, i) => (
             <Text key={i} position={[0, -startY - 1.15 - i * 0.28, 0]} fontSize={0.11} color="#f59e0b" anchorX="center" maxWidth={7}>
               {`⚠ ${w}`}
             </Text>
