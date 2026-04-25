@@ -2185,7 +2185,7 @@ export default function ReportPage() {
                     via the parent's items-center; on desktop reverts to the
                     original w-28 anchor with self-stretch so the right column
                     matches its height. */}
-                <div className="w-32 sm:w-28 flex-shrink-0 rounded-lg overflow-hidden sm:self-stretch min-h-[220px]" style={{ border: "1px solid rgba(6,182,212,0.25)", background: "rgba(2,8,23,0.9)" }}>
+                <div className="w-32 sm:w-28 flex-shrink-0 rounded-lg overflow-hidden aspect-[3/4] sm:aspect-auto sm:self-stretch sm:min-h-[220px]" style={{ border: "1px solid rgba(6,182,212,0.25)", background: "rgba(2,8,23,0.9)" }}>
                   <Scene camera={{ position: [0, 0, 3.5], fov: 45 }}>
                     <PatientAvatar3D sex={(patientCtx as any).sex || "unknown"} />
                   </Scene>
