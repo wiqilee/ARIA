@@ -104,10 +104,13 @@ function DNAHelix() {
       {helixData.bonds.map((b, i) => {
         const pts = [new THREE.Vector3(...b.a), new THREE.Vector3(...b.b)];
         const geo = new THREE.BufferGeometry().setFromPoints(pts);
+        const mat = new THREE.LineBasicMaterial({
+          color: "#00bfa5",
+          transparent: true,
+          opacity: 0.2,
+        });
         return (
-          <line key={`bond-${i}`} geometry={geo}>
-            <lineBasicMaterial color="#00bfa5" transparent opacity={0.2} />
-          </line>
+          <primitive key={`bond-${i}`} object={new THREE.Line(geo, mat)} />
         );
       })}
     </group>
@@ -206,20 +209,18 @@ function ConnectionLine({
   start: [number, number, number];
   end: [number, number, number];
 }) {
-  const pts = useMemo(
-    () => [new THREE.Vector3(...start), new THREE.Vector3(...end)],
-    [start, end],
-  );
-  const geo = useMemo(
-    () => new THREE.BufferGeometry().setFromPoints(pts),
-    [pts],
-  );
+  const lineObject = useMemo(() => {
+    const pts = [new THREE.Vector3(...start), new THREE.Vector3(...end)];
+    const geo = new THREE.BufferGeometry().setFromPoints(pts);
+    const mat = new THREE.LineBasicMaterial({
+      color: "#00e5ff",
+      transparent: true,
+      opacity: 0.1,
+    });
+    return new THREE.Line(geo, mat);
+  }, [start, end]);
 
-  return (
-    <line geometry={geo}>
-      <lineBasicMaterial color="#00e5ff" transparent opacity={0.1} />
-    </line>
-  );
+  return <primitive object={lineObject} />;
 }
 
 /* ── Main Export ── */
