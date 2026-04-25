@@ -5,16 +5,13 @@ RUN apt-get update && apt-get install -y pkg-config libssl-dev && rm -rf /var/li
 
 WORKDIR /app
 
-# Copy everything (no caching trick — let Cargo handle incremental compilation properly)
 COPY Cargo.toml Cargo.lock* ./
 COPY src/ src/
 
-# Build the actual binary
 RUN cargo build --release
 
-# Verify binary exists (sanity check during build)
-RUN ls -la /app/target/release/aria-mcp-server && \
-    file /app/target/release/aria-mcp-server
+# Sanity check binary exists
+RUN ls -la /app/target/release/aria-mcp-server
 
 # ── Stage 2: Runtime ────────────────────────────────────────
 FROM debian:bookworm-slim
