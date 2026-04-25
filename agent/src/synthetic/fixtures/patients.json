@@ -1,0 +1,189 @@
+[
+  {
+    "id": "patient_001",
+    "age": 79,
+    "sex": "male",
+    "weight_kg": 69.4,
+    "height_cm": 173.9,
+    "ckd_stage": 1,
+    "hepatic_impairment": true,
+    "smoking": false,
+    "alcohol_use": "heavy",
+    "comorbidities": [
+      "heart failure",
+      "gout"
+    ],
+    "allergies": [
+      "sulfa"
+    ]
+  },
+  {
+    "id": "patient_002",
+    "age": 21,
+    "sex": "male",
+    "weight_kg": 72.4,
+    "height_cm": 170.3,
+    "ckd_stage": 3,
+    "hepatic_impairment": false,
+    "smoking": false,
+    "alcohol_use": "none",
+    "comorbidities": [
+      "insomnia",
+      "heart failure",
+      "anxiety",
+      "hypothyroidism",
+      "COPD"
+    ],
+    "allergies": [
+      "penicillin"
+    ]
+  },
+  {
+    "id": "patient_003",
+    "age": 93,
+    "sex": "female",
+    "weight_kg": 40.0,
+    "height_cm": 157.1,
+    "ckd_stage": 2,
+    "hepatic_impairment": false,
+    "smoking": false,
+    "alcohol_use": "heavy",
+    "comorbidities": [
+      "osteoporosis",
+      "hypothyroidism",
+      "COPD"
+    ],
+    "allergies": [
+      "cephalosporins"
+    ]
+  },
+  {
+    "id": "patient_004",
+    "age": 89,
+    "sex": "female",
+    "weight_kg": 79.8,
+    "height_cm": 149.3,
+    "ckd_stage": 3,
+    "hepatic_impairment": false,
+    "smoking": false,
+    "alcohol_use": "occasional",
+    "comorbidities": [
+      "anxiety"
+    ],
+    "allergies": [
+      "sulfa"
+    ]
+  },
+  {
+    "id": "patient_005",
+    "age": 37,
+    "sex": "female",
+    "weight_kg": 64.1,
+    "height_cm": 157.3,
+    "ckd_stage": 0,
+    "hepatic_impairment": false,
+    "smoking": false,
+    "alcohol_use": "heavy",
+    "comorbidities": [
+      "atrial fibrillation",
+      "hypothyroidism",
+      "gout"
+    ],
+    "allergies": []
+  },
+  {
+    "id": "patient_006",
+    "age": 44,
+    "sex": "female",
+    "weight_kg": 61.4,
+    "height_cm": 163.7,
+    "ckd_stage": 4,
+    "hepatic_impairment": false,
+    "smoking": false,
+    "alcohol_use": "occasional",
+    "comorbidities": [
+      "anxiety"
+    ],
+    "allergies": [
+      "iodine"
+    ]
+  },
+  {
+    "id": "patient_007",
+    "age": 43,
+    "sex": "female",
+    "weight_kg": 64.8,
+    "height_cm": 153.5,
+    "ckd_stage": 1,
+    "hepatic_impairment": false,
+    "smoking": false,
+    "alcohol_use": "none",
+    "comorbidities": [
+      "COPD",
+      "coronary artery disease",
+      "atrial fibrillation",
+      "heart failure"
+    ],
+    "allergies": [
+      "latex"
+    ]
+  },
+  {
+    "id": "patient_008",
+    "age": 71,
+    "sex": "male",
+    "weight_kg": 59.9,
+    "height_cm": 182.1,
+    "ckd_stage": 4,
+    "hepatic_impairment": false,
+    "smoking": false,
+    "alcohol_use": "heavy",
+    "comorbidities": [
+      "osteoarthritis",
+      "GERD"
+    ],
+    "allergies": [
+      "sulfa"
+    ]
+  },
+  {
+    "id": "patient_009",
+    "age": 88,
+    "sex": "male",
+    "weight_kg": 72.5,
+    "height_cm": 175.5,
+    "ckd_stage": 0,
+    "hepatic_impairment": false,
+    "smoking": false,
+    "alcohol_use": "heavy",
+    "comorbidities": [
+      "chronic kidney disease",
+      "GERD",
+      "gout",
+      "osteoarthritis",
+      "type 2 diabetes"
+    ],
+    "allergies": []
+  },
+  {
+    "id": "patient_010",
+    "age": 84,
+    "sex": "male",
+    "weight_kg": 60.7,
+    "height_cm": 169.6,
+    "ckd_stage": 1,
+    "hepatic_impairment": false,
+    "smoking": false,
+    "alcohol_use": "occasional",
+    "comorbidities": [
+      "depression",
+      "atrial fibrillation",
+      "osteoarthritis",
+      "GERD",
+      "peripheral neuropathy"
+    ],
+    "allergies": [
+      "penicillin"
+    ]
+  }
+]

@@ -1,0 +1,124 @@
+# =================================================================
+# ARIA — .gitignore
+# Monorepo: Rust (MCP server) + Python (agent) + Next.js (frontend)
+# =================================================================
+
+# =================================================================
+# Environment variables — never commit these
+# =================================================================
+.env
+.env.local
+.env.*.local
+*.env
+!.env.example
+!**/.env.example
+
+# =====================================================================
+# Rust (mcp-server)
+# Note: Cargo.lock IS committed for binary applications (best practice)
+# =====================================================================
+mcp-server/target/
+mcp-server/**/*.rs.bk
+target/
+
+# =====================================================================
+# Python (agent)
+# =====================================================================
+agent/__pycache__/
+agent/**/__pycache__/
+agent/**/*.py[cod]
+agent/.venv/
+agent/venv/
+agent/env/
+agent/.pytest_cache/
+agent/.mypy_cache/
+agent/.ruff_cache/
+agent/dist/
+agent/build/
+agent/*.egg-info/
+agent/.coverage
+agent/htmlcov/
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# =====================================================================
+# Node / Next.js (frontend)
+# =====================================================================
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/build/
+frontend/.vercel/
+frontend/.turbo/
+frontend/coverage/
+frontend/*.tsbuildinfo
+frontend/next-env.d.ts
+node_modules/
+.next/
+.vercel/
+
+# =====================================================================
+# Google Cloud — never commit credentials
+# =====================================================================
+google-cloud-sdk/
+google-cloud-cli-*.tar.gz
+google-cloud-cli-*.zip
+gcp-sa-key.json
+*-credentials.json
+*-keyfile.json
+service-account*.json
+**/credentials.json
+**/credentials/
+
+# =====================================================================
+# Secrets and private keys
+# =====================================================================
+*.pem
+*.p12
+*-private.key
+*.private.key
+private-keys/
+
+# =====================================================================
+# OS-specific
+# =====================================================================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# =====================================================================
+# Editors
+# =====================================================================
+.vscode/
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
+
+# ====================================================================
+# Logs
+# ====================================================================
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ====================================================================
+# Build artifacts (catch-all)
+# ====================================================================
+dist/
+build/
+*.egg-info/

@@ -1,0 +1,402 @@
+[
+  {
+    "patient_id": "patient_001",
+    "medications": [
+      {
+        "name": "metformin",
+        "dose": "500mg",
+        "frequency": "once daily"
+      },
+      {
+        "name": "metoprolol",
+        "dose": "50mg",
+        "frequency": "twice daily"
+      },
+      {
+        "name": "valproic acid",
+        "dose": "10mg",
+        "frequency": "as needed"
+      },
+      {
+        "name": "simvastatin",
+        "dose": "40mg",
+        "frequency": "twice daily"
+      },
+      {
+        "name": "calcium carbonate",
+        "dose": "25mg",
+        "frequency": "as needed"
+      },
+      {
+        "name": "quetiapine",
+        "dose": "10mg",
+        "frequency": "twice daily"
+      }
+    ]
+  },
+  {
+    "patient_id": "patient_002",
+    "medications": [
+      {
+        "name": "levothyroxine",
+        "dose": "10mg",
+        "frequency": "once daily"
+      },
+      {
+        "name": "ibuprofen",
+        "dose": "400mg",
+        "frequency": "once daily"
+      },
+      {
+        "name": "fish oil",
+        "dose": "100mg",
+        "frequency": "twice daily"
+      },
+      {
+        "name": "calcium carbonate",
+        "dose": "100mg",
+        "frequency": "twice daily"
+      },
+      {
+        "name": "sertraline",
+        "dose": "50mg",
+        "frequency": "once daily"
+      },
+      {
+        "name": "ranitidine",
+        "dose": "250mg",
+        "frequency": "once daily"
+      },
+      {
+        "name": "haloperidol",
+        "dose": "10mg",
+        "frequency": "once daily"
+      },
+      {
+        "name": "potassium chloride",
+        "dose": "5mg",
+        "frequency": "three times daily"
+      },
+      {
+        "name": "clopidogrel",
+        "dose": "75mg",
+        "frequency": "twice daily"
+      },
+      {
+        "name": "metoprolol",
+        "dose": "50mg",
+        "frequency": "as needed"
+      }
+    ]
+  },
+  {
+    "patient_id": "patient_003",
+    "medications": [
+      {
+        "name": "carbamazepine",
+        "dose": "500mg",
+        "frequency": "as needed"
+      },
+      {
+        "name": "furosemide",
+        "dose": "40mg",
+        "frequency": "as needed"
+      },
+      {
+        "name": "valproic acid",
+        "dose": "10mg",
+        "frequency": "once daily"
+      },
+      {
+        "name": "fish oil",
+        "dose": "5mg",
+        "frequency": "as needed"
+      },
+      {
+        "name": "duloxetine",
+        "dose": "25mg",
+        "frequency": "as needed"
+      },
+      {
+        "name": "metoprolol",
+        "dose": "50mg",
+        "frequency": "as needed"
+      }
+    ]
+  },
+  {
+    "patient_id": "patient_004",
+    "medications": [
+      {
+        "name": "metformin",
+        "dose": "500mg",
+        "frequency": "twice daily"
+      },
+      {
+        "name": "vitamin D",
+        "dose": "100mg",
+        "frequency": "as needed"
+      },
+      {
+        "name": "calcium carbonate",
+        "dose": "10mg",
+        "frequency": "as needed"
+      },
+      {
+        "name": "fish oil",
+        "dose": "10mg",
+        "frequency": "three times daily"
+      },
+      {
+        "name": "lisinopril",
+        "dose": "10mg",
+        "frequency": "twice daily"
+      },
+      {
+        "name": "magnesium oxide",
+        "dose": "500mg",
+        "frequency": "once daily"
+      },
+      {
+        "name": "ibuprofen",
+        "dose": "400mg",
+        "frequency": "once daily"
+      },
+      {
+        "name": "ciprofloxacin",
+        "dose": "5mg",
+        "frequency": "once daily"
+      },
+      {
+        "name": "iron sulfate",
+        "dose": "5mg",
+        "frequency": "twice daily"
+      },
+      {
+        "name": "metoprolol",
+        "dose": "50mg",
+        "frequency": "as needed"
+      }
+    ]
+  },
+  {
+    "patient_id": "patient_005",
+    "medications": [
+      {
+        "name": "duloxetine",
+        "dose": "25mg",
+        "frequency": "as needed"
+      },
+      {
+        "name": "gabapentin",
+        "dose": "300mg",
+        "frequency": "as needed"
+      },
+      {
+        "name": "ibuprofen",
+        "dose": "400mg",
+        "frequency": "as needed"
+      },
+      {
+        "name": "metformin",
+        "dose": "500mg",
+        "frequency": "twice daily"
+      },
+      {
+        "name": "amitriptyline",
+        "dose": "25mg",
+        "frequency": "twice daily"
+      },
+      {
+        "name": "alprazolam",
+        "dose": "5mg",
+        "frequency": "once daily"
+      },
+      {
+        "name": "warfarin",
+        "dose": "5mg",
+        "frequency": "three times daily"
+      },
+      {
+        "name": "potassium chloride",
+        "dose": "5mg",
+        "frequency": "once daily"
+      }
+    ]
+  },
+  {
+    "patient_id": "patient_006",
+    "medications": [
+      {
+        "name": "duloxetine",
+        "dose": "100mg",
+        "frequency": "once daily"
+      },
+      {
+        "name": "risperidone",
+        "dose": "250mg",
+        "frequency": "twice daily"
+      },
+      {
+        "name": "haloperidol",
+        "dose": "50mg",
+        "frequency": "once daily"
+      },
+      {
+        "name": "amitriptyline",
+        "dose": "25mg",
+        "frequency": "twice daily"
+      },
+      {
+        "name": "metformin",
+        "dose": "500mg",
+        "frequency": "once daily"
+      },
+      {
+        "name": "vitamin D",
+        "dose": "100mg",
+        "frequency": "once daily"
+      },
+      {
+        "name": "simvastatin",
+        "dose": "40mg",
+        "frequency": "three times daily"
+      },
+      {
+        "name": "diphenhydramine",
+        "dose": "25mg",
+        "frequency": "twice daily"
+      },
+      {
+        "name": "amlodipine",
+        "dose": "5mg",
+        "frequency": "three times daily"
+      }
+    ]
+  },
+  {
+    "patient_id": "patient_007",
+    "medications": [
+      {
+        "name": "losartan",
+        "dose": "25mg",
+        "frequency": "once daily"
+      },
+      {
+        "name": "ibuprofen",
+        "dose": "400mg",
+        "frequency": "as needed"
+      },
+      {
+        "name": "furosemide",
+        "dose": "40mg",
+        "frequency": "once daily"
+      },
+      {
+        "name": "calcium carbonate",
+        "dose": "5mg",
+        "frequency": "twice daily"
+      },
+      {
+        "name": "levothyroxine",
+        "dose": "100mg",
+        "frequency": "three times daily"
+      },
+      {
+        "name": "pantoprazole",
+        "dose": "10mg",
+        "frequency": "three times daily"
+      }
+    ]
+  },
+  {
+    "patient_id": "patient_008",
+    "medications": [
+      {
+        "name": "metoprolol",
+        "dose": "50mg",
+        "frequency": "three times daily"
+      },
+      {
+        "name": "sertraline",
+        "dose": "50mg",
+        "frequency": "once daily"
+      },
+      {
+        "name": "atorvastatin",
+        "dose": "20mg",
+        "frequency": "three times daily"
+      },
+      {
+        "name": "amitriptyline",
+        "dose": "25mg",
+        "frequency": "once daily"
+      },
+      {
+        "name": "ranitidine",
+        "dose": "10mg",
+        "frequency": "three times daily"
+      }
+    ]
+  },
+  {
+    "patient_id": "patient_009",
+    "medications": [
+      {
+        "name": "lisinopril",
+        "dose": "10mg",
+        "frequency": "twice daily"
+      },
+      {
+        "name": "phenytoin",
+        "dose": "250mg",
+        "frequency": "three times daily"
+      },
+      {
+        "name": "digoxin",
+        "dose": "0.125mg",
+        "frequency": "three times daily"
+      },
+      {
+        "name": "hydrochlorothiazide",
+        "dose": "100mg",
+        "frequency": "as needed"
+      },
+      {
+        "name": "atorvastatin",
+        "dose": "20mg",
+        "frequency": "once daily"
+      }
+    ]
+  },
+  {
+    "patient_id": "patient_010",
+    "medications": [
+      {
+        "name": "iron sulfate",
+        "dose": "25mg",
+        "frequency": "twice daily"
+      },
+      {
+        "name": "acetaminophen",
+        "dose": "500mg",
+        "frequency": "three times daily"
+      },
+      {
+        "name": "hydrochlorothiazide",
+        "dose": "10mg",
+        "frequency": "as needed"
+      },
+      {
+        "name": "omeprazole",
+        "dose": "20mg",
+        "frequency": "as needed"
+      },
+      {
+        "name": "warfarin",
+        "dose": "5mg",
+        "frequency": "once daily"
+      }
+    ]
+  }
+]
