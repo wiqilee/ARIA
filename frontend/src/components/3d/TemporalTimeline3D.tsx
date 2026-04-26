@@ -24,6 +24,22 @@ export function TemporalTimeline3D({ data, onPointHover }: TemporalTimeline3DPro
   const groupRef = useRef<THREE.Group>(null);
   const [animProgress, setAnimProgress] = useState(0);
   const [hoveredPoint, setHoveredPoint] = useState<number | null>(null);
+  // On touch devices, pointerover/pointerout fire only momentarily during a
+  // tap, so we keep an explicit "locked" point that persists until the user
+  // taps it again or taps an empty area. Mouse devices never write to this.
+  const [lockedPoint, setLockedPoint] = useState<number | null>(null);
+  const [isTouchDevice, setIsTouchDevice] = useState(false);
+
+  // Detect coarse pointer (mobile/tablet) once on mount.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const mq = window.matchMedia("(hover: none), (pointer: coarse)");
+    setIsTouchDevice(mq.matches);
+  }, []);
+
+  // The "active" point drives both the side panel and the visual highlight.
+  // Locked point wins if set; otherwise fall back to mouse hover.
+  const activePoint = lockedPoint ?? hoveredPoint;
 
   const dailyRisk = data?.daily_risk ?? [];
   const timelineDays = data?.timeline_days ?? 0;
@@ -60,14 +76,14 @@ export function TemporalTimeline3D({ data, onPointHover }: TemporalTimeline3DPro
   });
 
   // Empty state
-  // Emit hover payload to parent for the side panel
+  // Emit hover/lock payload to parent for the side panel
   useEffect(() => {
     if (!onPointHover) return;
-    if (hoveredPoint === null || !points[hoveredPoint]) {
+    if (activePoint === null || !points[activePoint]) {
       onPointHover(null);
       return;
     }
-    const p = points[hoveredPoint];
+    const p = points[activePoint];
     const isPeak = p.day === peakRiskDay;
     const win = interventionWindows.find(
       (w) => p.day >= (w.day_start ?? 0) && p.day <= (w.day_end ?? 0),
@@ -80,7 +96,7 @@ export function TemporalTimeline3D({ data, onPointHover }: TemporalTimeline3DPro
       inInterventionWindow: !!win,
       windowAction: win?.action,
     });
-  }, [hoveredPoint, points, peakRiskDay, interventionWindows, onPointHover]);
+  }, [activePoint, points, peakRiskDay, interventionWindows, onPointHover]);
 
   if (dailyRisk.length === 0) {
     return (
@@ -178,7 +194,8 @@ export function TemporalTimeline3D({ data, onPointHover }: TemporalTimeline3DPro
           gives the chart real volume; the sphere's Z position (proportional
           to risk) makes peaks literally protrude toward the camera. */}
       {visiblePoints.map((pt, i) => {
-        const isHov = hoveredPoint === i;
+        const isHov = activePoint === i;
+        const isLockedHere = lockedPoint === i;
         const riskColor = getRiskColor(pt.risk);
         return (
           <group key={i}>
@@ -193,11 +210,24 @@ export function TemporalTimeline3D({ data, onPointHover }: TemporalTimeline3DPro
                 emissiveIntensity={isHov ? 0.4 : 0.15}
               />
             </mesh>
-            {/* Data sphere */}
+            {/* Data sphere — on touch devices we use onPointerDown to toggle
+                a lock instead of relying on hover (which fires only briefly
+                during a tap). On mouse devices we keep the original hover
+                behavior unchanged. */}
             <mesh
               position={[pt.x, pt.y, pt.z]}
-              onPointerOver={(e) => { e.stopPropagation(); setHoveredPoint(i); }}
-              onPointerOut={() => setHoveredPoint(null)}
+              onPointerOver={isTouchDevice
+                ? undefined
+                : (e) => { e.stopPropagation(); setHoveredPoint(i); }}
+              onPointerOut={isTouchDevice
+                ? undefined
+                : () => setHoveredPoint(null)}
+              onPointerDown={isTouchDevice
+                ? (e) => {
+                    e.stopPropagation();
+                    setLockedPoint((curr) => (curr === i ? null : i));
+                  }
+                : undefined}
             >
               <sphereGeometry args={[isHov ? 0.14 : 0.09, 24, 24]} />
               <meshStandardMaterial
@@ -208,16 +238,27 @@ export function TemporalTimeline3D({ data, onPointHover }: TemporalTimeline3DPro
                 roughness={0.3}
               />
             </mesh>
-            {/* Subtle hover ring indicator (XZ plane so it's always facing) */}
+            {/* Highlight ring — thicker + more opaque when locked (touch) so
+                users can see the persistence visually. */}
             {isHov && (
               <mesh position={[pt.x, pt.y, pt.z]} rotation={[Math.PI / 2, 0, 0]}>
-                <ringGeometry args={[0.18, 0.24, 24]} />
-                <meshBasicMaterial color="#ffffff" transparent opacity={0.55} />
+                <ringGeometry args={[0.18, isLockedHere ? 0.28 : 0.24, 24]} />
+                <meshBasicMaterial color="#ffffff" transparent opacity={isLockedHere ? 0.8 : 0.55} />
               </mesh>
             )}
           </group>
         );
       })}
+
+      {/* On touch devices, an invisible plane behind everything catches taps
+          on empty space so users can dismiss a locked point without having
+          to find it again. Mouse devices skip this entirely. */}
+      {isTouchDevice && (
+        <mesh position={[0, 0, -3]} onPointerDown={() => setLockedPoint(null)}>
+          <planeGeometry args={[40, 20]} />
+          <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+        </mesh>
+      )}
 
       {/* Inline tooltip is deliberately omitted here. The parent renders an
           HTML side-panel overlay (never clipped) via onPointHover. */}

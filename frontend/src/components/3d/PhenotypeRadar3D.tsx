@@ -86,6 +86,22 @@ export function PhenotypeRadar3D({
   const [animProgress, setAnimProgress] = useState(0);
   const [hoveredAxis, setHoveredAxis] = useState<number | null>(null);
   const [hoverTime, setHoverTime] = useState(0);
+  // On touch devices, pointerover/pointerout fire only momentarily during a
+  // tap, so we keep an explicit "locked" axis that persists until the user
+  // taps it again or taps an empty area.
+  const [lockedAxis, setLockedAxis] = useState<number | null>(null);
+  const [isTouchDevice, setIsTouchDevice] = useState(false);
+
+  // Detect coarse pointer (mobile/tablet) once on mount.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const mq = window.matchMedia("(hover: none), (pointer: coarse)");
+    setIsTouchDevice(mq.matches);
+  }, []);
+
+  // The "active" axis drives the side panel and the visual highlight.
+  // Locked wins if set; otherwise fall back to mouse hover.
+  const activeAxis = lockedAxis ?? hoveredAxis;
 
   // Reduced radius to fit better inside the canvas
   const radius = 2.4;
@@ -122,16 +138,16 @@ export function PhenotypeRadar3D({
     );
   }, [modifiedValues]);
 
-  // Emit hover payload to parent so the side-panel can show details
+  // Emit hover/lock payload to parent so the side-panel can show details
   // outside the 3D canvas (no more clipped tooltips).
   useEffect(() => {
     if (!onHoverAxis) return;
-    if (hoveredAxis === null) {
+    if (activeAxis === null) {
       onHoverAxis(null);
       return;
     }
-    const axis = AXES[hoveredAxis];
-    const value = modifiedValues[hoveredAxis];
+    const axis = AXES[activeAxis];
+    const value = modifiedValues[activeAxis];
     const color = getRiskColor(value);
     const riskLabel: "LOW" | "MODERATE" | "HIGH" =
       value > 0.7 ? "HIGH" : value > 0.4 ? "MODERATE" : "LOW";
@@ -152,7 +168,7 @@ export function PhenotypeRadar3D({
       explanation,
       action,
     });
-  }, [hoveredAxis, modifiedValues, onHoverAxis]);
+  }, [activeAxis, modifiedValues, onHoverAxis]);
 
   useFrame(({ clock }) => {
     setAnimProgress(Math.min(clock.getElapsedTime() * 0.5, 1));
@@ -162,7 +178,7 @@ export function PhenotypeRadar3D({
       groupRef.current.rotation.z =
         Math.sin(clock.getElapsedTime() * 0.1) * 0.03;
     }
-    if (hoveredAxis !== null) {
+    if (activeAxis !== null) {
       setHoverTime(clock.getElapsedTime());
     }
   });
@@ -227,7 +243,7 @@ export function PhenotypeRadar3D({
 
         {/* Axis lines + labels */}
         {axisPositions.map((pos, i) => {
-          const isHovered = hoveredAxis === i;
+          const isHovered = activeAxis === i;
           const riskVal = modifiedValues[i];
           const riskColor = getRiskColor(riskVal);
           return (
@@ -291,21 +307,30 @@ export function PhenotypeRadar3D({
 
         {/* Interactive data points */}
         {basePolygon.map((pt, i) => {
-          const isHovered = hoveredAxis === i;
+          const isHovered = activeAxis === i;
+          const isLockedHere = lockedAxis === i;
           const riskColor = getRiskColor(modifiedValues[i]);
           return (
             <group key={i}>
-              {/* Glow ring on hover */}
+              {/* Glow ring on hover/lock — thicker when locked. */}
               {isHovered && (
                 <mesh position={pt}>
-                  <ringGeometry args={[0.14, 0.2, 24]} />
-                  <meshBasicMaterial color={riskColor} transparent opacity={0.15 + Math.sin(hoverTime * 4) * 0.08} />
+                  <ringGeometry args={[0.14, isLockedHere ? 0.24 : 0.2, 24]} />
+                  <meshBasicMaterial color={riskColor} transparent opacity={isLockedHere ? 0.35 : 0.15 + Math.sin(hoverTime * 4) * 0.08} />
                 </mesh>
               )}
+              {/* On touch devices we use onPointerDown to toggle a lock; on
+                  mouse devices we keep the original hover behavior. */}
               <mesh
                 position={pt}
-                onPointerOver={() => setHoveredAxis(i)}
-                onPointerOut={() => setHoveredAxis(null)}
+                onPointerOver={isTouchDevice ? undefined : () => setHoveredAxis(i)}
+                onPointerOut={isTouchDevice ? undefined : () => setHoveredAxis(null)}
+                onPointerDown={isTouchDevice
+                  ? (e) => {
+                      e.stopPropagation();
+                      setLockedAxis((curr) => (curr === i ? null : i));
+                    }
+                  : undefined}
               >
                 <sphereGeometry args={[isHovered ? 0.12 : 0.08, 16, 16]} />
                 <meshStandardMaterial
@@ -317,6 +342,15 @@ export function PhenotypeRadar3D({
             </group>
           );
         })}
+
+        {/* On touch devices, an invisible plane catches taps on empty space
+            so users can dismiss a locked axis. Mouse devices skip this. */}
+        {isTouchDevice && (
+          <mesh position={[0, 0, -2]} onPointerDown={() => setLockedAxis(null)}>
+            <planeGeometry args={[20, 20]} />
+            <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+          </mesh>
+        )}
 
         {/* Center phenotype score */}
         {animProgress > 0.8 && (
