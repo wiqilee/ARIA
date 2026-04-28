@@ -34,6 +34,10 @@ MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "http://localhost:8080")
 HOST = os.getenv("HOST", "0.0.0.0")
 PORT = int(os.getenv("PORT", "8000"))
 
+# Public-facing URL for A2A agent card (used by external clients like Prompt Opinion).
+# Falls back to local dev URL if not set.
+PUBLIC_AGENT_URL = os.getenv("PUBLIC_AGENT_URL", f"http://{HOST}:{PORT}")
+
 # ── MCP Client ──────────────────────────────────────────────
 
 mcp_client = MCPClient(MCP_SERVER_URL)
@@ -54,6 +58,7 @@ async def lifespan(app: FastAPI):
             logger.warning("MCP initialize failed (non-fatal): %s", e)
     else:
         logger.warning("MCP server at %s is not reachable — agent will retry on requests", MCP_SERVER_URL)
+    logger.info("Public agent URL: %s", PUBLIC_AGENT_URL)
     yield
     logger.info("ARIA Agent shutting down")
 
@@ -122,23 +127,56 @@ class A2ATaskRequest(BaseModel):
     message: dict[str, Any]
 
 
-class A2AAgentCard(BaseModel):
-    """A2A agent card describing this agent's capabilities."""
-    name: str = "ARIA"
-    description: str = "Adaptive Risk Intelligence for Polypharmacy Assessment"
-    url: str = ""
-    version: str = "0.1.0"
-    capabilities: dict[str, Any] = Field(default_factory=lambda: {
-        "streaming": False,
-        "pushNotifications": False,
-    })
-    skills: list[dict[str, str]] = Field(default_factory=lambda: [
-        {
-            "id": "polypharmacy-analysis",
-            "name": "Polypharmacy Risk Analysis",
-            "description": "Analyzes drug interactions, computes personalized risk scores, and generates deprescribing plans.",
-        }
-    ])
+# ── A2A Agent Card Builder ──────────────────────────────────
+
+
+def _build_agent_card() -> dict[str, Any]:
+    """Construct the A2A agent card describing this agent's capabilities.
+
+    Uses PUBLIC_AGENT_URL env var so external clients (e.g. Prompt Opinion)
+    can call back the agent at its public URL, not the internal container address.
+    """
+    return {
+        "name": "ARIA",
+        "description": (
+            "Adaptive Risk Intelligence for Polypharmacy Assessment. "
+            "Detects N-drug interactions, predicts risk timelines, "
+            "and generates evidence-based deprescribing plans."
+        ),
+        "url": PUBLIC_AGENT_URL,
+        "version": "0.1.0",
+        "provider": {
+            "organization": "Wiqi Labs",
+            "url": "https://github.com/wiqilee/ARIA",
+        },
+        "capabilities": {
+            "streaming": False,
+            "pushNotifications": False,
+        },
+        "defaultInputModes": ["text/plain", "application/json"],
+        "defaultOutputModes": ["text/plain", "application/json"],
+        "skills": [
+            {
+                "id": "polypharmacy-analysis",
+                "name": "Polypharmacy Risk Analysis",
+                "description": (
+                    "Analyzes drug interactions, computes personalized risk scores, "
+                    "and generates deprescribing plans."
+                ),
+                "tags": [
+                    "clinical",
+                    "pharmacy",
+                    "drug-interactions",
+                    "fhir",
+                    "polypharmacy",
+                ],
+                "examples": [
+                    "Analyze interactions for 78yo male with CKD3 on warfarin, aspirin, ibuprofen, atorvastatin",
+                    "Generate deprescribing plan for patient with 8 medications",
+                ],
+            }
+        ],
+    }
 
 
 # ── Routes ──────────────────────────────────────────────────
@@ -183,11 +221,15 @@ async def analyze(request: AnalyzeRequest):
 
 
 @app.get("/.well-known/agent.json")
-async def agent_card():
-    """Return the A2A agent card for discovery."""
-    return A2AAgentCard(
-        url=f"http://{HOST}:{PORT}",
-    ).model_dump()
+async def agent_card_legacy():
+    """Legacy A2A path. Kept for backward compatibility."""
+    return _build_agent_card()
+
+
+@app.get("/.well-known/agent-card.json")
+async def agent_card_standard():
+    """A2A protocol standard path (used by Prompt Opinion and modern A2A clients)."""
+    return _build_agent_card()
 
 
 @app.post("/a2a/tasks/send")
@@ -247,6 +289,7 @@ async def a2a_task_send(task: A2ATaskRequest):
 if __name__ == "__main__":
     logger.info("Starting ARIA Agent on %s:%d", HOST, PORT)
     logger.info("MCP Server URL: %s", MCP_SERVER_URL)
+    logger.info("Public Agent URL: %s", PUBLIC_AGENT_URL)
     uvicorn.run(
         "main:app",
         host=HOST,
