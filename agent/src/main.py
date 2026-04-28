@@ -135,6 +135,9 @@ def _build_agent_card() -> dict[str, Any]:
 
     Uses PUBLIC_AGENT_URL env var so external clients (e.g. Prompt Opinion)
     can call back the agent at its public URL, not the internal container address.
+
+    Includes `supportedInterfaces` per A2A spec — declares the transport endpoints
+    this agent exposes (JSON-RPC over HTTP at /a2a/tasks/send).
     """
     return {
         "name": "ARIA",
@@ -145,6 +148,8 @@ def _build_agent_card() -> dict[str, Any]:
         ),
         "url": PUBLIC_AGENT_URL,
         "version": "0.1.0",
+        "protocolVersion": "0.3.0",
+        "preferredTransport": "JSONRPC",
         "provider": {
             "organization": "Wiqi Labs",
             "url": "https://github.com/wiqilee/ARIA",
@@ -152,9 +157,16 @@ def _build_agent_card() -> dict[str, Any]:
         "capabilities": {
             "streaming": False,
             "pushNotifications": False,
+            "stateTransitionHistory": False,
         },
         "defaultInputModes": ["text/plain", "application/json"],
         "defaultOutputModes": ["text/plain", "application/json"],
+        "supportedInterfaces": [
+            {
+                "transport": "JSONRPC",
+                "url": f"{PUBLIC_AGENT_URL}/a2a/tasks/send",
+            }
+        ],
         "skills": [
             {
                 "id": "polypharmacy-analysis",
@@ -174,6 +186,8 @@ def _build_agent_card() -> dict[str, Any]:
                     "Analyze interactions for 78yo male with CKD3 on warfarin, aspirin, ibuprofen, atorvastatin",
                     "Generate deprescribing plan for patient with 8 medications",
                 ],
+                "inputModes": ["text/plain", "application/json"],
+                "outputModes": ["text/plain", "application/json"],
             }
         ],
     }
