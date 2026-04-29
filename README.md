@@ -3,7 +3,6 @@
 # ARIA
 ### Adaptive Risk Intelligence for Polypharmacy Assessment
 
-
 **An AI agent system that does not just detect drug interactions. It reasons about them.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -23,6 +22,48 @@
 > Over 90% of drug interaction alerts are ignored by clinicians. Not because they are reckless, but because existing tools deliver undifferentiated noise with zero actionable context. ARIA fixes this.
 
 </div>
+
+---
+
+## Table of Contents
+
+- [Live Deployment](#live-deployment)
+  - [Production URLs](#production-urls)
+  - [Health Check Endpoints](#health-check-endpoints)
+  - [Try It Live (60 seconds, no signup)](#try-it-live-60-seconds-no-signup)
+  - [Production Deployment Stack](#production-deployment-stack)
+- [The Problem Nobody Has Solved](#the-problem-nobody-has-solved)
+- [What ARIA Does Differently](#what-aria-does-differently)
+  - [Ten Capabilities That Do Not Exist Anywhere Else](#ten-capabilities-that-do-not-exist-anywhere-else)
+- [Architecture](#architecture)
+  - [System Overview](#system-overview)
+  - [Agent Reasoning Pipeline](#agent-reasoning-pipeline)
+  - [CI/CD Pipeline](#cicd-pipeline)
+  - [Service-to-Service Communication](#service-to-service-communication)
+- [Project Structure](#project-structure)
+- [LLM Configuration](#llm-configuration)
+- [Stack](#stack)
+  - [MCP Tools Exposed](#mcp-tools-exposed)
+  - [Frontend Design System](#frontend-design-system)
+- [Prompt Opinion Marketplace Integration](#prompt-opinion-marketplace-integration)
+  - [Integration Flow](#integration-flow)
+  - [SHARP Extension Specs](#sharp-extension-specs)
+  - [Marketplace Listing](#marketplace-listing)
+- [Google Cloud Setup (asia-southeast2)](#google-cloud-setup-asia-southeast2)
+- [CI/CD and Deployment](#cicd-and-deployment)
+  - [GitHub Actions: MCP Server](#github-actions-mcp-server)
+  - [GitHub Actions: A2A Agent](#github-actions-a2a-agent)
+  - [GitHub Actions: Frontend (Vercel)](#github-actions-frontend-vercel)
+  - [GitHub Actions: Tests](#github-actions-tests)
+  - [Vercel Configuration](#vercel-configuration)
+  - [Required GitHub Secrets](#required-github-secrets)
+- [Getting Started (Local Development)](#getting-started-local-development)
+- [Why This Matters](#why-this-matters)
+- [Novelty Table](#novelty-table)
+- [Data and Privacy](#data-and-privacy)
+- [Roadmap](#roadmap)
+- [License](#license)
+- [Built By](#built-by)
 
 ---
 
@@ -51,7 +92,7 @@ curl -I https://aria-polypharmacy.vercel.app
 
 # A2A Agent (Python LangGraph orchestrator)
 curl https://aria-a2a-agent-233281205053.asia-southeast2.run.app/health
-# Expected: {"status":"healthy","service":"aria-agent","mcp_server":"connected","mcp_url":"https://aria-mcp-server-233281205053.asia-southeast2.run.app"}
+# Expected: {"status":"healthy","service":"aria-agent","mcp_server":"connected", ...}
 
 # MCP Server (Rust drug knowledge backend)
 curl https://aria-mcp-server-233281205053.asia-southeast2.run.app/health
@@ -62,17 +103,17 @@ curl https://aria-mcp-server-233281205053.asia-southeast2.run.app/health
 
 1. Open https://aria-polypharmacy.vercel.app/analyze
 2. Click any **Quick Test** preset:
-   - **72F CKD3** — expect risk score **9.6 CRITICAL**
-   - **81M Cardiac** — expect **8.3 HIGH**
-   - **65F Anticholinergic Burden** — expect **8.4 HIGH**
-3. Wait ~10 seconds while the LangGraph agent orchestrates Gemini 2.5 Pro reasoning over Vertex AI
+   - **72F CKD3** returns risk score **9.6 CRITICAL**
+   - **81M Cardiac** returns **8.3 HIGH**
+   - **65F Anticholinergic Burden** returns **8.4 HIGH**
+3. Wait about 10 seconds while the LangGraph agent orchestrates Gemini 2.5 Pro reasoning over Vertex AI
 4. View the rendered 3D interaction graph, phenotype radar, deprescribing waterfall, and exportable PDF clinical report
 
 ### Production Deployment Stack
 
-- **LLM**: Gemini 2.5 Pro via **Vertex AI** in `asia-southeast2` (no API keys; uses GCP IAM)
+- **LLM**: Gemini 2.5 Pro via Vertex AI in `asia-southeast2` (no API keys, uses GCP IAM)
 - **Authentication**: Default compute service account with `roles/aiplatform.user` and `roles/secretmanager.secretAccessor`
-- **Secrets**: OpenFDA API key stored in **GCP Secret Manager**, mounted into the Agent at runtime as `OPENFDA_API_KEY`
+- **Secrets**: OpenFDA API key stored in GCP Secret Manager, mounted into the Agent at runtime as `OPENFDA_API_KEY`
 - **Container Registry**: Artifact Registry at `asia-southeast2-docker.pkg.dev/aria-2026-ai/aria-images`
 - **Frontend**: Next.js 15 on Vercel with `NEXT_PUBLIC_AGENT_URL` pointing to the Cloud Run agent
 - **CI/CD**: GitHub Actions workflows in `.github/workflows/` auto-deploy on push to `main`
@@ -106,13 +147,13 @@ No one has built a system that reasons about risk. Until now.
 
 ARIA is not a drug interaction checker. It is a **clinical reasoning engine**: a hybrid AI agent system that understands context, mechanism, time, and patient phenotype.
 
-### Eight Capabilities That Do Not Exist Anywhere Else
+### Ten Capabilities That Do Not Exist Anywhere Else
 
 #### 1. Temporal Cascade Modeling
 Drug interactions do not manifest instantly. They evolve. ARIA models the **timeline of risk**, predicting when an interaction will peak and when to intervene, not just whether it exists.
 
 #### 2. Pharmacokinetic Mechanistic Reasoning
-ARIA explains *why* an interaction is dangerous at the **molecular level**: CYP enzyme competition, renal clearance conflicts, protein binding displacement, gut microbiome interference. Gemini 2.5 Pro-powered reasoning, not heuristic lookup.
+ARIA explains *why* an interaction is dangerous at the **molecular level**: CYP enzyme competition, renal clearance conflicts, protein binding displacement, gut microbiome interference. Gemini 2.5 Pro powers the reasoning, not heuristic lookup.
 
 #### 3. Patient Phenotype Risk Multiplier
 The same drug combination carries vastly different risk profiles across patients. ARIA calculates a **personalized risk score** adjusted for age, sex, CKD stage, hepatic function, smoking status, and more.
@@ -333,7 +374,7 @@ ARIA/
 |   |   |   |   |-- page.tsx            # About page: problem, solution, capabilities, usage, credits
 |   |   |   |-- api/
 |   |   |       |-- analyze/
-|   |   |           |-- route.ts        # Next.js API route: proxies to agent
+|   |   |           |-- route.ts        # Next.js API route, proxies to agent
 |   |   |-- components/
 |   |   |   |-- ui/                     # shadcn/ui base components
 |   |   |   |-- layout/
@@ -358,7 +399,7 @@ ARIA/
 |   |   |   |   |-- DrugInput.tsx       # Single drug entry with autocomplete
 |   |   |   |   |-- PatientContextForm.tsx  # Age, sex, CKD stage, comorbidities
 |   |   |   |-- report/
-|   |   |   |   |-- RiskReport.tsx      # Structured report: burden scores, interactions, deprescribing, citations
+|   |   |   |   |-- RiskReport.tsx      # Structured report with burden scores, interactions, deprescribing, citations
 |   |   |   |   |-- InteractionCard.tsx # Single interaction detail card
 |   |   |   |   |-- EvidenceBadge.tsx   # A/B/C/D evidence grade badge
 |   |   |   |   |-- SeverityMeter.tsx   # Animated 0-10 risk meter
@@ -405,7 +446,7 @@ ARIA supports two Gemini auth modes selected at runtime via the `LLM_MODE` envir
 | `vertex_ai` (default) | GCP IAM + service account | Production with enterprise access control |
 | `ai_studio` | Google AI Studio API key | Hackathon demos, lightweight external integrations |
 
-Prompt logic is identical across both modes; only the HTTP endpoint and auth header change. The switch is one function in [`mcp-server/src/api/gemini.rs`](mcp-server/src/api/gemini.rs). Production deployments use `vertex_ai` by default; the Prompt Opinion marketplace integration uses `ai_studio` for the free-tier onboarding flow during connection verification.
+Prompt logic is identical across both modes. Only the HTTP endpoint and auth header change. The switch is a single function in [`mcp-server/src/api/gemini.rs`](mcp-server/src/api/gemini.rs). Production deployments use `vertex_ai` by default. The Prompt Opinion marketplace integration uses `ai_studio` for the free-tier onboarding flow during connection verification.
 
 ```bash
 # Production (default)
@@ -505,13 +546,13 @@ Patient context (patient ID) and FHIR bearer tokens propagate through multi-agen
 
 ### Marketplace Listing
 
-Available on Prompt Opinion Marketplace: _Listing in progress — registration on https://app.promptopinion.ai_
+Available on Prompt Opinion Marketplace: *Listing in progress, registration on https://app.promptopinion.ai*
 
 ---
 
-## Google Cloud Setup (`asia-southeast2`)
+## Google Cloud Setup (asia-southeast2)
 
-All backend services run on Google Cloud Run in the **`asia-southeast2`** region. This minimizes latency for Southeast Asian users and keeps data residency within the region.
+All backend services run on Google Cloud Run in the `asia-southeast2` region. This minimizes latency for Southeast Asian users and keeps data residency within the region.
 
 ### 1. Initial GCP Project Setup
 
@@ -530,7 +571,7 @@ gcloud services enable \
   aiplatform.googleapis.com
 ```
 
-### 2. Create Artifact Registry (`asia-southeast2`)
+### 2. Create Artifact Registry (asia-southeast2)
 
 ```bash
 gcloud artifacts repositories create aria-repo \
@@ -591,14 +632,14 @@ echo -n "YOUR_OPENFDA_API_KEY" | \
   gcloud secrets create openfda-api-key --data-file=-
 
 # Gemini 2.5 Pro runs via Vertex AI.
-# No separate API key needed — access is controlled by IAM roles above.
+# No separate API key needed. Access is controlled by IAM roles above.
 
 gcloud secrets add-iam-policy-binding openfda-api-key \
   --member="serviceAccount:aria-cicd@YOUR_PROJECT_ID.iam.gserviceaccount.com" \
   --role="roles/secretmanager.secretAccessor"
 ```
 
-### 5. Deploy MCP Server to Cloud Run (`asia-southeast2`)
+### 5. Deploy MCP Server to Cloud Run (asia-southeast2)
 
 ```bash
 docker build -t asia-southeast2-docker.pkg.dev/YOUR_PROJECT_ID/aria-repo/aria-mcp-server:latest ./mcp-server
@@ -617,7 +658,7 @@ gcloud run deploy aria-mcp-server \
   --set-secrets OPENFDA_API_KEY=openfda-api-key:latest
 ```
 
-### 6. Deploy A2A Agent to Cloud Run (`asia-southeast2`)
+### 6. Deploy A2A Agent to Cloud Run (asia-southeast2)
 
 ```bash
 docker build -t asia-southeast2-docker.pkg.dev/YOUR_PROJECT_ID/aria-repo/aria-agent:latest ./agent
@@ -765,7 +806,8 @@ jobs:
             --allow-unauthenticated \
             --memory 1Gi \
             --cpu 1 \
-            --set-env-vars MCP_SERVER_URL=${{ secrets.MCP_SERVER_URL }},GOOGLE_CLOUD_PROJECT=${{ secrets.GCP_PROJECT_ID }},VERTEXAI_LOCATION=asia-southeast2,GEMINI_MODEL=gemini-2.5-pro
+            --port 8000 \
+            --set-env-vars MCP_SERVER_URL=${{ secrets.MCP_SERVER_URL }},PUBLIC_AGENT_URL=${{ secrets.PUBLIC_AGENT_URL }},GOOGLE_CLOUD_PROJECT=${{ secrets.GCP_PROJECT_ID }},VERTEXAI_LOCATION=asia-southeast2,GEMINI_MODEL=gemini-2.5-pro
 ```
 
 ### GitHub Actions: Frontend (Vercel)
@@ -861,7 +903,7 @@ jobs:
 }
 ```
 
-### Connect Vercel to GitHub (One-Time Setup)
+To connect Vercel to GitHub for the first time:
 
 ```bash
 npm install -g vercel
@@ -888,6 +930,7 @@ cat frontend/.vercel/project.json
 | `GCP_PROJECT_ID` | Your GCP project ID | `gcloud config get-value project` |
 | `OPENFDA_API_KEY` | OpenFDA API key | [open.fda.gov/apis/authentication](https://open.fda.gov/apis/authentication/) |
 | `MCP_SERVER_URL` | Cloud Run URL for MCP Server | `gcloud run services describe aria-mcp-server --region asia-southeast2 --format='value(status.url)'` |
+| `PUBLIC_AGENT_URL` | Cloud Run URL for A2A Agent (used in agent card) | `gcloud run services describe aria-agent --region asia-southeast2 --format='value(status.url)'` |
 | `VERCEL_TOKEN` | Vercel personal access token | [vercel.com/account/tokens](https://vercel.com/account/tokens) |
 | `VERCEL_ORG_ID` | Vercel organization ID | `cat frontend/.vercel/project.json` |
 | `VERCEL_PROJECT_ID` | Vercel project ID | `cat frontend/.vercel/project.json` |
@@ -899,7 +942,7 @@ cat frontend/.vercel/project.json
 ## Getting Started (Local Development)
 
 ```bash
-git clone https://github.com/wiqi-lee/ARIA
+git clone https://github.com/wiqilee/ARIA
 cd ARIA
 
 cp .env.example .env
@@ -1016,7 +1059,7 @@ This project is licensed under the MIT License. See the [LICENSE](LICENSE) file 
 
 ## Built By
 
-**Wiqi Lee** — Data Scientist, AI/ML Researcher, Software Engineer
+**Wiqi Lee**, Data Scientist, AI/ML Researcher, Software Engineer
 
 [![Twitter](https://img.shields.io/badge/Twitter-@wiqi__lee-1DA1F2?logo=twitter)](https://twitter.com/wiqi_lee)
 [![GitHub](https://img.shields.io/badge/GitHub-wiqilee-181717?logo=github)](https://github.com/wiqilee)
@@ -1029,5 +1072,5 @@ This project is licensed under the MIT License. See the [LICENSE](LICENSE) file 
 *Sponsored by Prompt Opinion (Darena Health)*
 
 <div align="center">
-<sub>Built with Rust · Python · LangGraph · Gemini 2.5 Pro · Google Cloud Run (asia-southeast2) · Vercel · React Three Fiber</sub>
+<sub>Built with Rust, Python, LangGraph, Gemini 2.5 Pro, Google Cloud Run (asia-southeast2), Vercel, and React Three Fiber</sub>
 </div>
