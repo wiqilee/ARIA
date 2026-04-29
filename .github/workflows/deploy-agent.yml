@@ -44,8 +44,10 @@ jobs:
 
       - name: Deploy to Cloud Run
         run: |
+          IMAGE="${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT }}/${{ env.ARTIFACT_REPO }}/${{ env.SERVICE_NAME }}:${{ github.sha }}"
+
           gcloud run deploy ${{ env.SERVICE_NAME }} \
-            --image "${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT }}/${{ env.ARTIFACT_REPO }}/${{ env.SERVICE_NAME }}:${{ github.sha }}" \
+            --image "$IMAGE" \
             --region ${{ env.GCP_REGION }} \
             --platform managed \
             --allow-unauthenticated \
@@ -54,9 +56,26 @@ jobs:
             --min-instances 0 \
             --max-instances 5 \
             --timeout 300 \
-            --set-env-vars "GOOGLE_CLOUD_PROJECT=${{ env.GCP_PROJECT }},VERTEXAI_LOCATION=${{ env.GCP_REGION }},GEMINI_MODEL=gemini-2.5-pro,MCP_SERVER_URL=${{ secrets.MCP_SERVER_URL }}"
+            --port 8000 \
+            --set-env-vars "GOOGLE_CLOUD_PROJECT=${{ env.GCP_PROJECT }},VERTEXAI_LOCATION=${{ env.GCP_REGION }},GEMINI_MODEL=gemini-2.5-pro,MCP_SERVER_URL=${{ secrets.MCP_SERVER_URL }},PUBLIC_AGENT_URL=${{ secrets.PUBLIC_AGENT_URL }}" \
+            --set-secrets "OPENFDA_API_KEY=openfda-api-key:latest"
 
       - name: Output service URL
         run: |
-          URL=$(gcloud run services describe ${{ env.SERVICE_NAME }} --region ${{ env.GCP_REGION }} --format='value(status.url)')
-          echo "A2A Agent deployed to: $URL"
+          URL=$(gcloud run services describe ${{ env.SERVICE_NAME }} \
+            --region ${{ env.GCP_REGION }} \
+            --format='value(status.url)')
+          echo "A2A Agent deployed to $URL"
+          echo "AGENT_URL=$URL" >> $GITHUB_ENV
+
+      - name: Health check
+        run: |
+          echo "Waiting 10s for service to be ready..."
+          sleep 10
+          HEALTH=$(curl -s -o /dev/null -w "%{http_code}" "${{ env.AGENT_URL }}/health" || echo "000")
+          if [ "$HEALTH" = "200" ]; then
+            echo "Health check passed"
+          else
+            echo "Health check returned HTTP $HEALTH"
+            exit 1
+          fi
