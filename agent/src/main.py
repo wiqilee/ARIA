@@ -38,6 +38,9 @@ PORT = int(os.getenv("PORT", "8000"))
 # Falls back to local dev URL if not set.
 PUBLIC_AGENT_URL = os.getenv("PUBLIC_AGENT_URL", f"http://{HOST}:{PORT}")
 
+# A2A protocol version this agent implements.
+A2A_PROTOCOL_VERSION = "0.3.0"
+
 # ── MCP Client ──────────────────────────────────────────────
 
 mcp_client = MCPClient(MCP_SERVER_URL)
@@ -133,11 +136,8 @@ class A2ATaskRequest(BaseModel):
 def _build_agent_card() -> dict[str, Any]:
     """Construct the A2A agent card describing this agent's capabilities.
 
-    Uses PUBLIC_AGENT_URL env var so external clients (e.g. Prompt Opinion)
-    can call back the agent at its public URL, not the internal container address.
-
-    Includes `supportedInterfaces` per A2A spec — declares the transport endpoints
-    this agent exposes (JSON-RPC over HTTP at /a2a/tasks/send).
+    Compliant with A2A protocol spec — includes per-interface protocolBinding
+    and protocolVersion as required by Prompt Opinion's strict parser.
     """
     return {
         "name": "ARIA",
@@ -148,7 +148,7 @@ def _build_agent_card() -> dict[str, Any]:
         ),
         "url": PUBLIC_AGENT_URL,
         "version": "0.1.0",
-        "protocolVersion": "0.3.0",
+        "protocolVersion": A2A_PROTOCOL_VERSION,
         "preferredTransport": "JSONRPC",
         "provider": {
             "organization": "Wiqi Labs",
@@ -165,6 +165,8 @@ def _build_agent_card() -> dict[str, Any]:
             {
                 "transport": "JSONRPC",
                 "url": f"{PUBLIC_AGENT_URL}/a2a/tasks/send",
+                "protocolBinding": "JSONRPC-2.0",
+                "protocolVersion": A2A_PROTOCOL_VERSION,
             }
         ],
         "skills": [
@@ -190,6 +192,8 @@ def _build_agent_card() -> dict[str, Any]:
                 "outputModes": ["text/plain", "application/json"],
             }
         ],
+        "securitySchemes": {},
+        "security": [],
     }
 
 
