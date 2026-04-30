@@ -1,4 +1,4 @@
-"""ARIA A2A Agent — FastAPI entrypoint with A2A protocol support."""
+"""ARIA A2A Agent — FastAPI entrypoint with A2A v1 protocol support."""
 
 from __future__ import annotations
 
@@ -38,8 +38,9 @@ PORT = int(os.getenv("PORT", "8000"))
 # Falls back to local dev URL if not set.
 PUBLIC_AGENT_URL = os.getenv("PUBLIC_AGENT_URL", f"http://{HOST}:{PORT}")
 
-# A2A protocol version this agent implements.
-A2A_PROTOCOL_VERSION = "0.3.0"
+# A2A protocol version this agent implements (v1 spec).
+# https://a2a-protocol.org/latest/announcing-1.0/
+A2A_PROTOCOL_VERSION = "1.0"
 
 # ── MCP Client ──────────────────────────────────────────────
 
@@ -130,14 +131,19 @@ class A2ATaskRequest(BaseModel):
     message: dict[str, Any]
 
 
-# ── A2A Agent Card Builder ──────────────────────────────────
+# ── A2A Agent Card Builder (v1 spec) ────────────────────────
 
 
 def _build_agent_card() -> dict[str, Any]:
-    """Construct the A2A agent card describing this agent's capabilities.
+    """Construct the A2A v1 agent card.
 
-    Compliant with A2A protocol spec — includes per-interface protocolBinding
-    and protocolVersion as required by Prompt Opinion's strict parser.
+    Conforms to the v1 spec changes:
+      - top-level `url` removed (now lives in supportedInterfaces[].url)
+      - `preferredTransport` removed (order in supportedInterfaces = preference)
+      - `capabilities.stateTransitionHistory` removed
+      - `protocolVersion` = "1.0"
+      - `securitySchemes` follows OpenAPI 3.0 format directly
+    Reference: https://docs.promptopinion.ai/a2a-v1-migration
     """
     return {
         "name": "ARIA",
@@ -146,10 +152,8 @@ def _build_agent_card() -> dict[str, Any]:
             "Detects N-drug interactions, predicts risk timelines, "
             "and generates evidence-based deprescribing plans."
         ),
-        "url": PUBLIC_AGENT_URL,
         "version": "0.1.0",
         "protocolVersion": A2A_PROTOCOL_VERSION,
-        "preferredTransport": "JSONRPC",
         "provider": {
             "organization": "Wiqi Labs",
             "url": "https://github.com/wiqilee/ARIA",
@@ -157,15 +161,13 @@ def _build_agent_card() -> dict[str, Any]:
         "capabilities": {
             "streaming": False,
             "pushNotifications": False,
-            "stateTransitionHistory": False,
         },
         "defaultInputModes": ["text/plain", "application/json"],
         "defaultOutputModes": ["text/plain", "application/json"],
         "supportedInterfaces": [
             {
-                "transport": "JSONRPC",
                 "url": f"{PUBLIC_AGENT_URL}/a2a/tasks/send",
-                "protocolBinding": "JSONRPC-2.0",
+                "protocolBinding": "JSONRPC",
                 "protocolVersion": A2A_PROTOCOL_VERSION,
             }
         ],
