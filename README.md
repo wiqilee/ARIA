@@ -79,7 +79,8 @@ ARIA is fully deployed and accessible to judges and reviewers right now. All end
 | **A2A Agent (Cloud Run)** | https://aria-a2a-agent-233281205053.asia-southeast2.run.app | Live |
 | **MCP Server (Cloud Run)** | https://aria-mcp-server-233281205053.asia-southeast2.run.app | Live |
 | **GCP Project** | `aria-2026-ai` (project number `233281205053`) | Active |
-| **Region** | `asia-southeast2` (Jakarta) | All backend services |
+| **Cloud Run Region** | `asia-southeast2` (Jakarta) | A2A Agent and MCP Server |
+| **Vertex AI Region** | `us-central1` | Gemini 2.5 Pro calls only |
 
 ### Health Check Endpoints
 
@@ -111,12 +112,14 @@ curl https://aria-mcp-server-233281205053.asia-southeast2.run.app/health
 
 ### Production Deployment Stack
 
-- **LLM**: Gemini 2.5 Pro via Vertex AI in `asia-southeast2` (no API keys, uses GCP IAM)
+- **LLM**: Gemini 2.5 Pro via Vertex AI in `us-central1` (no API keys, uses GCP IAM)
 - **Authentication**: Default compute service account with `roles/aiplatform.user` and `roles/secretmanager.secretAccessor`
 - **Secrets**: OpenFDA API key stored in GCP Secret Manager, mounted into the Agent at runtime as `OPENFDA_API_KEY`
 - **Container Registry**: Artifact Registry at `asia-southeast2-docker.pkg.dev/aria-2026-ai/aria-images`
 - **Frontend**: Next.js 15 on Vercel with `NEXT_PUBLIC_AGENT_URL` pointing to the Cloud Run agent
 - **CI/CD**: GitHub Actions workflows in `.github/workflows/` auto-deploy on push to `main`
+
+> **Note on Vertex AI region.** Cloud Run services are hosted in `asia-southeast2` (Jakarta) for low latency to Southeast Asian users, while Vertex AI calls are routed to `us-central1` because Gemini 2.5 Pro is not yet available in `asia-southeast2`. The added cross-region latency is roughly 200 ms per call, which is acceptable for the deliberative, non-interactive reasoning ARIA performs.
 
 ---
 
@@ -211,7 +214,7 @@ graph TD
     PO["🏥 Prompt Opinion Platform"]
     AGENT["🤖 ARIA A2A Agent\nPython / LangGraph\nCloud Run asia-southeast2"]
     MCP["⚙️ ARIA MCP Server\nRust\nCloud Run asia-southeast2"]
-    LLM["🧠 Gemini 2.5 Pro\nVertex AI asia-southeast2"]
+    LLM["🧠 Gemini 2.5 Pro\nVertex AI us-central1"]
     OPENFDA["OpenFDA API"]
     RXNORM["RxNorm API (NIH)"]
     PUBMED["PubMed API (NCBI)"]
@@ -452,7 +455,7 @@ Prompt logic is identical across both modes. Only the HTTP endpoint and auth hea
 # Production (default)
 LLM_MODE=vertex_ai
 GOOGLE_CLOUD_PROJECT=your-gcp-project-id
-VERTEXAI_LOCATION=asia-southeast2
+VERTEXAI_LOCATION=us-central1   # Gemini 2.5 Pro is not yet available in asia-southeast2
 
 # Hackathon / external platform integration
 LLM_MODE=ai_studio
@@ -467,7 +470,7 @@ GOOGLE_AI_STUDIO_API_KEY=AIza...
 |-------|-----------|--------|
 | MCP Server | Rust | Google Cloud Run (`asia-southeast2`) |
 | A2A Agent | Python + LangGraph | Google Cloud Run (`asia-southeast2`) |
-| LLM Reasoning | Gemini 2.5 Pro (Vertex AI) | `asia-southeast2` |
+| LLM Reasoning | Gemini 2.5 Pro (Vertex AI) | `us-central1` |
 | Container Registry | Google Artifact Registry | `asia-southeast2` |
 | Frontend | Next.js 14 + React Three Fiber + Framer Motion | Vercel Edge Network |
 | 3D Rendering | React Three Fiber + Drei + Postprocessing | Client-side |
@@ -654,7 +657,7 @@ gcloud run deploy aria-mcp-server \
   --cpu 1 \
   --min-instances 0 \
   --max-instances 10 \
-  --set-env-vars LLM_MODE=vertex_ai,GOOGLE_CLOUD_PROJECT=YOUR_PROJECT_ID,VERTEXAI_LOCATION=asia-southeast2,GEMINI_MODEL=gemini-2.5-pro,FHIR_BASE_URL=https://hapi.fhir.org/baseR4 \
+  --set-env-vars LLM_MODE=vertex_ai,GOOGLE_CLOUD_PROJECT=YOUR_PROJECT_ID,VERTEXAI_LOCATION=us-central1,GEMINI_MODEL=gemini-2.5-pro,FHIR_BASE_URL=https://hapi.fhir.org/baseR4 \
   --set-secrets OPENFDA_API_KEY=openfda-api-key:latest
 ```
 
@@ -677,7 +680,7 @@ gcloud run deploy aria-agent \
   --cpu 1 \
   --min-instances 0 \
   --max-instances 10 \
-  --set-env-vars MCP_SERVER_URL=$MCP_SERVER_URL,GOOGLE_CLOUD_PROJECT=YOUR_PROJECT_ID,VERTEXAI_LOCATION=asia-southeast2,GEMINI_MODEL=gemini-2.5-pro
+  --set-env-vars MCP_SERVER_URL=$MCP_SERVER_URL,GOOGLE_CLOUD_PROJECT=YOUR_PROJECT_ID,VERTEXAI_LOCATION=us-central1,GEMINI_MODEL=gemini-2.5-pro
 ```
 
 ### 7. Service-to-Service Communication
@@ -756,7 +759,7 @@ jobs:
             --allow-unauthenticated \
             --memory 512Mi \
             --cpu 1 \
-            --set-env-vars LLM_MODE=vertex_ai,GOOGLE_CLOUD_PROJECT=${{ secrets.GCP_PROJECT_ID }},VERTEXAI_LOCATION=asia-southeast2,GEMINI_MODEL=gemini-2.5-pro,FHIR_BASE_URL=https://hapi.fhir.org/baseR4 \
+            --set-env-vars LLM_MODE=vertex_ai,GOOGLE_CLOUD_PROJECT=${{ secrets.GCP_PROJECT_ID }},VERTEXAI_LOCATION=us-central1,GEMINI_MODEL=gemini-2.5-pro,FHIR_BASE_URL=https://hapi.fhir.org/baseR4 \
             --set-secrets OPENFDA_API_KEY=openfda-api-key:latest
 ```
 
@@ -807,7 +810,7 @@ jobs:
             --memory 1Gi \
             --cpu 1 \
             --port 8000 \
-            --set-env-vars MCP_SERVER_URL=${{ secrets.MCP_SERVER_URL }},PUBLIC_AGENT_URL=${{ secrets.PUBLIC_AGENT_URL }},GOOGLE_CLOUD_PROJECT=${{ secrets.GCP_PROJECT_ID }},VERTEXAI_LOCATION=asia-southeast2,GEMINI_MODEL=gemini-2.5-pro
+            --set-env-vars MCP_SERVER_URL=${{ secrets.MCP_SERVER_URL }},PUBLIC_AGENT_URL=${{ secrets.PUBLIC_AGENT_URL }},GOOGLE_CLOUD_PROJECT=${{ secrets.GCP_PROJECT_ID }},VERTEXAI_LOCATION=us-central1,GEMINI_MODEL=gemini-2.5-pro
 ```
 
 ### GitHub Actions: Frontend (Vercel)

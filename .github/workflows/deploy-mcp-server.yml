@@ -11,6 +11,11 @@ on:
 env:
   GCP_PROJECT: ${{ secrets.GCP_PROJECT_ID }}
   GCP_REGION: asia-southeast2
+  # Vertex AI must be called from us-central1 — Gemini 2.5 Pro is not yet
+  # available in asia-southeast2. Cloud Run service stays in asia-southeast2
+  # for low latency to Southeast Asian users; the LLM call is the only thing
+  # that crosses regions.
+  VERTEX_LOCATION: us-central1
   SERVICE_NAME: aria-mcp-server
   ARTIFACT_REPO: aria-images
 
@@ -53,7 +58,7 @@ jobs:
             --cpu 1 \
             --min-instances 0 \
             --max-instances 5 \
-            --set-env-vars "LLM_MODE=vertex_ai,GOOGLE_CLOUD_PROJECT=${{ env.GCP_PROJECT }},VERTEXAI_LOCATION=${{ env.GCP_REGION }},GEMINI_MODEL=gemini-2.5-pro,FHIR_BASE_URL=https://hapi.fhir.org/baseR4" \
+            --set-env-vars "LLM_MODE=vertex_ai,GOOGLE_CLOUD_PROJECT=${{ env.GCP_PROJECT }},VERTEXAI_LOCATION=${{ env.VERTEX_LOCATION }},GEMINI_MODEL=gemini-2.5-pro,FHIR_BASE_URL=https://hapi.fhir.org/baseR4" \
             --set-secrets "OPENFDA_API_KEY=openfda-api-key:latest"
 
       - name: Output service URL
