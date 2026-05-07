@@ -1,16 +1,19 @@
-"""ARIA A2A Agent — FastAPI entrypoint with A2A v1 protocol support."""
+"""ARIA A2A Agent — FastAPI entrypoint with A2A v1.0 (JSON-RPC 2.0) protocol support."""
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import sys
+import uuid
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from typing import Any
 
 import uvicorn
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -61,7 +64,10 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.warning("MCP initialize failed (non-fatal): %s", e)
     else:
-        logger.warning("MCP server at %s is not reachable — agent will retry on requests", MCP_SERVER_URL)
+        logger.warning(
+            "MCP server at %s is not reachable — agent will retry on requests",
+            MCP_SERVER_URL,
+        )
     logger.info("Public agent URL: %s", PUBLIC_AGENT_URL)
     yield
     logger.info("ARIA Agent shutting down")
@@ -122,13 +128,65 @@ class AnalyzeResponse(BaseModel):
     errors: list[str] = Field(default_factory=list)
 
 
-# ── A2A Protocol Models ─────────────────────────────────────
+# ── A2A v1.0 JSON-RPC Models ────────────────────────────────
+
+
+class JSONRPCRequest(BaseModel):
+    """JSON-RPC 2.0 envelope used by A2A v1.0."""
+
+    jsonrpc: str = "2.0"
+    id: str | int | None = None
+    method: str
+    params: dict[str, Any] = Field(default_factory=dict)
 
 
 class A2ATaskRequest(BaseModel):
-    """Simplified A2A task send request."""
+    """Legacy (pre-JSON-RPC) A2A task send request. Kept for backward compatibility."""
+
     id: str
     message: dict[str, Any]
+
+
+# ── A2A Helpers ─────────────────────────────────────────────
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _jsonrpc_result(req_id: Any, result: dict[str, Any]) -> dict[str, Any]:
+    return {"jsonrpc": "2.0", "id": req_id, "result": result}
+
+
+def _jsonrpc_error(req_id: Any, code: int, message: str) -> dict[str, Any]:
+    return {
+        "jsonrpc": "2.0",
+        "id": req_id,
+        "error": {"code": code, "message": message},
+    }
+
+
+def _build_task(
+    task_id: str,
+    context_id: str,
+    state: str,
+    text: str,
+    artifact_name: str = "aria-analysis",
+) -> dict[str, Any]:
+    """Build an A2A v1.0 Task object."""
+    return {
+        "id": task_id,
+        "contextId": context_id,
+        "kind": "task",
+        "status": {"state": state, "timestamp": _now_iso()},
+        "artifacts": [
+            {
+                "artifactId": str(uuid.uuid4()),
+                "name": artifact_name,
+                "parts": [{"kind": "text", "text": text}],
+            }
+        ],
+    }
 
 
 # ── A2A Agent Card Builder (v1 spec) ────────────────────────
@@ -166,7 +224,8 @@ def _build_agent_card() -> dict[str, Any]:
         "defaultOutputModes": ["text/plain", "application/json"],
         "supportedInterfaces": [
             {
-                "url": f"{PUBLIC_AGENT_URL}/a2a/tasks/send",
+                # NEW: A2A v1.0 JSON-RPC 2.0 endpoint (preferred)
+                "url": f"{PUBLIC_AGENT_URL}/a2a/v1",
                 "protocolBinding": "JSONRPC",
                 "protocolVersion": A2A_PROTOCOL_VERSION,
             }
@@ -199,6 +258,24 @@ def _build_agent_card() -> dict[str, Any]:
     }
 
 
+# ── Pipeline Helper ─────────────────────────────────────────
+
+
+def _parse_message_content(parts: list[dict[str, Any]]) -> tuple[list, Any]:
+    """Extract medications + patient context from A2A message parts."""
+    content = "".join(p.get("text", "") for p in parts if isinstance(p, dict) and "text" in p)
+
+    try:
+        data = json.loads(content) if content else {}
+    except json.JSONDecodeError:
+        # Fall back: treat as comma-separated drug list
+        data = {"medications": [m.strip() for m in content.split(",") if m.strip()]}
+
+    medications = data.get("medications", []) if isinstance(data, dict) else []
+    patient = data.get("patient") if isinstance(data, dict) else None
+    return medications, patient
+
+
 # ── Routes ──────────────────────────────────────────────────
 
 
@@ -216,8 +293,6 @@ async def health():
 @app.post("/analyze", response_model=AnalyzeResponse)
 async def analyze(request: AnalyzeRequest):
     """Main analysis endpoint. Runs the full ARIA pipeline."""
-
-    # Convert medications to the pipeline format
     meds: list[str | dict] = []
     for med in request.medications:
         if isinstance(med, str):
@@ -252,55 +327,121 @@ async def agent_card_standard():
     return _build_agent_card()
 
 
-@app.post("/a2a/tasks/send")
-async def a2a_task_send(task: A2ATaskRequest):
-    """Handle an A2A task send request (from Prompt Opinion or other A2A agents)."""
+@app.post("/a2a/v1")
+async def a2a_jsonrpc(request: Request):
+    """A2A v1.0 JSON-RPC 2.0 endpoint (preferred).
 
-    message = task.message
-    content = message.get("parts", [{}])[0].get("text", "")
+    Handles JSON-RPC envelopes from Prompt Opinion and other A2A v1.0 clients.
+    Supported methods:
+      - message/send : execute a one-shot task and return the completed Task object
+    """
+    try:
+        raw = await request.json()
+    except Exception as e:
+        logger.error("A2A: invalid JSON body: %s", e)
+        return _jsonrpc_error(None, -32700, "Parse error")
 
-    # Parse the message content as medication analysis request
-    # Expected: JSON with medications and optional patient context
-    import json
+    logger.info(
+        "A2A: method=%s id=%s",
+        raw.get("method"),
+        raw.get("id"),
+    )
 
     try:
-        data = json.loads(content) if isinstance(content, str) else content
-    except json.JSONDecodeError:
-        # Treat as a plain text medication list
-        medications = [m.strip() for m in content.split(",") if m.strip()]
-        data = {"medications": medications}
+        rpc = JSONRPCRequest(**raw)
+    except Exception as e:
+        logger.error("A2A: invalid JSON-RPC envelope: %s | body=%s", e, raw)
+        return _jsonrpc_error(raw.get("id"), -32600, f"Invalid Request: {e}")
 
-    medications = data.get("medications", [])
-    patient = data.get("patient")
+    if rpc.method in ("message/send", "tasks/send"):
+        return await _handle_message_send(rpc)
+
+    return _jsonrpc_error(rpc.id, -32601, f"Method not found: {rpc.method}")
+
+
+async def _handle_message_send(rpc: JSONRPCRequest) -> dict[str, Any]:
+    """Process an A2A v1.0 message/send request and return a completed Task."""
+    message = rpc.params.get("message", {}) or {}
+    parts = message.get("parts", []) or []
+
+    medications, patient = _parse_message_content(parts)
+
+    task_id = str(uuid.uuid4())
+    context_id = message.get("contextId") or str(uuid.uuid4())
+
+    if not medications:
+        return _jsonrpc_result(
+            rpc.id,
+            _build_task(
+                task_id,
+                context_id,
+                "failed",
+                "No medications provided. Send JSON with a 'medications' array, "
+                "or a comma-separated drug list.",
+            ),
+        )
+
+    try:
+        result = await run_pipeline(medications, patient, mcp_client)
+        return _jsonrpc_result(
+            rpc.id,
+            _build_task(
+                task_id,
+                context_id,
+                "completed",
+                json.dumps(result, default=str),
+            ),
+        )
+    except Exception as e:
+        logger.error("A2A pipeline failed: %s", e, exc_info=True)
+        return _jsonrpc_result(
+            rpc.id,
+            _build_task(
+                task_id,
+                context_id,
+                "failed",
+                f"Analysis failed: {e}",
+            ),
+        )
+
+
+@app.post("/a2a/tasks/send")
+async def a2a_task_send_legacy(task: A2ATaskRequest):
+    """Legacy A2A task send endpoint (pre-JSON-RPC). Kept for backward compatibility."""
+    message = task.message
+    parts = message.get("parts", []) if isinstance(message, dict) else []
+    medications, patient = _parse_message_content(parts)
 
     if not medications:
         return {
             "id": task.id,
             "status": {"state": "failed"},
-            "artifacts": [{
-                "parts": [{"text": "No medications provided. Please send a list of medications to analyze."}]
-            }],
+            "artifacts": [
+                {
+                    "parts": [
+                        {
+                            "text": "No medications provided. Please send a list of medications to analyze."
+                        }
+                    ]
+                }
+            ],
         }
 
     try:
         result = await run_pipeline(medications, patient, mcp_client)
-
         return {
             "id": task.id,
             "status": {"state": "completed"},
-            "artifacts": [{
-                "parts": [{
-                    "text": json.dumps(result, default=str),
-                }]
-            }],
+            "artifacts": [
+                {"parts": [{"text": json.dumps(result, default=str)}]}
+            ],
         }
     except Exception as e:
+        logger.error("Legacy A2A pipeline failed: %s", e, exc_info=True)
         return {
             "id": task.id,
             "status": {"state": "failed"},
-            "artifacts": [{
-                "parts": [{"text": f"Analysis failed: {e}"}]
-            }],
+            "artifacts": [{"parts": [{"text": f"Analysis failed: {e}"}]}],
         }
 
 
