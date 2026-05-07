@@ -45,6 +45,17 @@ PUBLIC_AGENT_URL = os.getenv("PUBLIC_AGENT_URL", f"http://{HOST}:{PORT}")
 # https://a2a-protocol.org/latest/announcing-1.0/
 A2A_PROTOCOL_VERSION = "1.0"
 
+# Method aliases accepted on the JSON-RPC endpoint.
+# The A2A v1.0 spec uses "message/send" and "tasks/send", but several real-world
+# clients (notably Prompt Opinion) emit PascalCase names like "SendMessage".
+# We accept all common variants so the agent works across the ecosystem.
+A2A_SEND_METHODS = frozenset({
+    "message/send",
+    "tasks/send",
+    "SendMessage",
+    "sendMessage",
+})
+
 # ── MCP Client ──────────────────────────────────────────────
 
 mcp_client = MCPClient(MCP_SERVER_URL)
@@ -332,8 +343,11 @@ async def a2a_jsonrpc(request: Request):
     """A2A v1.0 JSON-RPC 2.0 endpoint (preferred).
 
     Handles JSON-RPC envelopes from Prompt Opinion and other A2A v1.0 clients.
-    Supported methods:
-      - message/send : execute a one-shot task and return the completed Task object
+    Supported method aliases (see A2A_SEND_METHODS):
+      - message/send   (A2A spec)
+      - tasks/send     (A2A spec, legacy alias)
+      - SendMessage    (Prompt Opinion convention)
+      - sendMessage    (camelCase variant)
     """
     try:
         raw = await request.json()
@@ -353,14 +367,14 @@ async def a2a_jsonrpc(request: Request):
         logger.error("A2A: invalid JSON-RPC envelope: %s | body=%s", e, raw)
         return _jsonrpc_error(raw.get("id"), -32600, f"Invalid Request: {e}")
 
-    if rpc.method in ("message/send", "tasks/send"):
+    if rpc.method in A2A_SEND_METHODS:
         return await _handle_message_send(rpc)
 
     return _jsonrpc_error(rpc.id, -32601, f"Method not found: {rpc.method}")
 
 
 async def _handle_message_send(rpc: JSONRPCRequest) -> dict[str, Any]:
-    """Process an A2A v1.0 message/send request and return a completed Task."""
+    """Process an A2A v1.0 message/send (or alias) request and return a completed Task."""
     message = rpc.params.get("message", {}) or {}
     parts = message.get("parts", []) or []
 
