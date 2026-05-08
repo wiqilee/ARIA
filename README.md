@@ -14,7 +14,7 @@
 [![Prompt Opinion](https://img.shields.io/badge/Prompt_Opinion-Marketplace-green)](https://app.promptopinion.ai)
 
 [![Medium](https://img.shields.io/badge/Read_on-Medium-black?logo=medium)](https://medium.com/@YOUR_MEDIUM_HANDLE)
-[![X](https://img.shields.io/badge/X-@wiqi__lee-000000?logo=x)](https://x.com/wiqi_lee)
+[![X](https://img.shields.io/badge/@wiqi__lee-000000?logo=x)](https://x.com/wiqi_lee)
 [![YouTube](https://img.shields.io/badge/Demo-YouTube-red?logo=youtube)](https://youtube.com/YOUR_DEMO_LINK)
 
 <br/>
