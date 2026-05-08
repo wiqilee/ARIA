@@ -1106,7 +1106,7 @@ This project is licensed under the MIT License. See the [LICENSE](LICENSE) file 
 
 **Wiqi Lee**, Data Scientist, AI/ML Researcher, Software Engineer
 
-[![X](https://img.shields.io/badge/X-@wiqi__lee-000000?logo=x)](https://x.com/wiqi_lee)
+[![X](https://img.shields.io/badge/@wiqi__lee-000000?logo=x)](https://x.com/wiqi_lee)
 [![GitHub](https://img.shields.io/badge/GitHub-wiqilee-181717?logo=github)](https://github.com/wiqilee)
 [![Medium](https://img.shields.io/badge/Medium-Read_Articles-black?logo=medium)](https://medium.com/@YOUR_MEDIUM_HANDLE)
 [![YouTube](https://img.shields.io/badge/Demo_Video-YouTube-red?logo=youtube)](https://youtube.com/YOUR_DEMO_LINK)
