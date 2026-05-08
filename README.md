@@ -14,7 +14,7 @@
 [![Prompt Opinion](https://img.shields.io/badge/Prompt_Opinion-Marketplace-green)](https://app.promptopinion.ai)
 
 [![Medium](https://img.shields.io/badge/Read_on-Medium-black?logo=medium)](https://medium.com/@YOUR_MEDIUM_HANDLE)
-[![Twitter](https://img.shields.io/badge/Twitter-@wiqi__lee-1DA1F2?logo=twitter)](https://twitter.com/wiqi_lee)
+[![X](https://img.shields.io/badge/X-@wiqi__lee-000000?logo=x)](https://x.com/wiqi_lee)
 [![YouTube](https://img.shields.io/badge/Demo-YouTube-red?logo=youtube)](https://youtube.com/YOUR_DEMO_LINK)
 
 <br/>
@@ -74,14 +74,22 @@ ARIA is fully deployed and accessible to judges and reviewers right now. All end
 
 ### Production URLs
 
-| Component | URL | Status |
-|---|---|---|
-| **Frontend (Vercel)** | https://aria-polypharmacy.vercel.app | Live |
-| **A2A Agent (Cloud Run)** | https://aria-a2a-agent-233281205053.asia-southeast2.run.app | Live |
-| **MCP Server (Cloud Run)** | https://aria-mcp-server-233281205053.asia-southeast2.run.app | Live |
-| **GCP Project** | `aria-2026-ai` (project number `233281205053`) | Active |
-| **Cloud Run Region** | `asia-southeast2` (Jakarta) | A2A Agent and MCP Server |
-| **Vertex AI Region** | `us-central1` | Gemini 2.5 Pro calls only |
+| Component | Base URL | Health Check | Status |
+|---|---|---|---|
+| **Frontend (Vercel)** | [aria-polypharmacy.vercel.app](https://aria-polypharmacy.vercel.app) | — | Live |
+| **A2A Agent (Cloud Run)** | [aria-a2a-agent-233281205053.asia-southeast2.run.app](https://aria-a2a-agent-233281205053.asia-southeast2.run.app) | [`/health`](https://aria-a2a-agent-233281205053.asia-southeast2.run.app/health) | Live |
+| **MCP Server (Cloud Run)** | [aria-mcp-server-233281205053.asia-southeast2.run.app](https://aria-mcp-server-233281205053.asia-southeast2.run.app) | [`/health`](https://aria-mcp-server-233281205053.asia-southeast2.run.app/health) | Live |
+
+| Setting | Value |
+|---|---|
+| **GCP Project** | `aria-2026-ai` (project number `233281205053`) |
+| **Cloud Run Region** | `asia-southeast2` (Jakarta) — A2A Agent and MCP Server |
+| **Vertex AI Region** | `us-central1` — Gemini 2.5 Pro calls only |
+
+> **Note:** The links in the **Health Check** column return the canonical
+> JSON health payload expected by judges and uptime monitors. The base URLs
+> are shown for reference (e.g. for use as `PUBLIC_AGENT_URL` in client
+> configuration); they are not intended to be opened in a browser.
 
 ### Health Check Endpoints
 
@@ -1098,14 +1106,14 @@ This project is licensed under the MIT License. See the [LICENSE](LICENSE) file 
 
 **Wiqi Lee**, Data Scientist, AI/ML Researcher, Software Engineer
 
-[![Twitter](https://img.shields.io/badge/Twitter-@wiqi__lee-1DA1F2?logo=twitter)](https://twitter.com/wiqi_lee)
+[![X](https://img.shields.io/badge/X-@wiqi__lee-000000?logo=x)](https://x.com/wiqi_lee)
 [![GitHub](https://img.shields.io/badge/GitHub-wiqilee-181717?logo=github)](https://github.com/wiqilee)
 [![Medium](https://img.shields.io/badge/Medium-Read_Articles-black?logo=medium)](https://medium.com/@YOUR_MEDIUM_HANDLE)
 [![YouTube](https://img.shields.io/badge/Demo_Video-YouTube-red?logo=youtube)](https://youtube.com/YOUR_DEMO_LINK)
 
 ---
 
-*Submitted to the [Agents Assemble: Healthcare AI Endgame Hackathon](https://agents-assemble.devpost.com)*
+*Submitted to the [Agents Assemble: Healthcare AI Endgame Hackathon](https://devpost.com/software/aria-adaptive-risk-intelligence-for-polypharmacy-assessment)*
 *Sponsored by Prompt Opinion (Darena Health)*
 
 <div align="center">

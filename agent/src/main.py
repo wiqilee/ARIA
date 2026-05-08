@@ -200,6 +200,239 @@ def _build_task(
     }
 
 
+# ── Markdown Clinical Report Formatter ──────────────────────
+#
+# Po (Prompt Opinion's orchestrator) renders A2A artifact text as chat content.
+# When we return raw JSON, Po treats it as opaque structured data and summarizes
+# it down to "I have sent the analysis...". By converting the pipeline result
+# into Markdown here, Po pastes it directly as a rich chat message — headings,
+# tables, bullets, warnings all render natively in the Prompt Opinion UI.
+
+
+def _risk_emoji(score: float | int | None) -> str:
+    """Map risk score (0–10) to an emoji indicator."""
+    if score is None:
+        return "⚪"
+    try:
+        s = float(score)
+    except (TypeError, ValueError):
+        return "⚪"
+    if s >= 8:
+        return "🔴"
+    if s >= 5:
+        return "🟠"
+    if s >= 3:
+        return "🟡"
+    return "🟢"
+
+
+def _fmt_patient(patient: Any) -> str:
+    """Format patient context as a one-line summary."""
+    if not isinstance(patient, dict) or not patient:
+        return "_No patient context provided._"
+    bits: list[str] = []
+    if patient.get("age"):
+        bits.append(f"{patient['age']}yo")
+    if patient.get("sex") and patient["sex"] != "unknown":
+        bits.append(str(patient["sex"]))
+    ckd = patient.get("ckd_stage")
+    if ckd:
+        bits.append(f"CKD stage {ckd}")
+    if patient.get("hepatic_impairment"):
+        bits.append("hepatic impairment")
+    comorbid = patient.get("comorbidities") or []
+    if comorbid:
+        bits.append("comorbidities: " + ", ".join(comorbid))
+    allergies = patient.get("allergies") or []
+    if allergies:
+        bits.append("allergies: " + ", ".join(allergies))
+    return ", ".join(bits) if bits else "_No patient context provided._"
+
+
+def _fmt_meds(medications: list[Any]) -> str:
+    """Format medication list as a comma-separated string."""
+    names: list[str] = []
+    for m in medications:
+        if isinstance(m, str):
+            names.append(m)
+        elif isinstance(m, dict):
+            names.append(str(m.get("name", "?")))
+    return ", ".join(names) if names else "_(none)_"
+
+
+def _format_pipeline_result_markdown(
+    medications: list[Any],
+    patient: Any,
+    result: dict[str, Any],
+) -> str:
+    """Convert the ARIA pipeline result into a clinical Markdown report.
+
+    The output is designed to render well inside Prompt Opinion's chat UI
+    (Po pastes artifact text verbatim when it's plain text/markdown).
+    """
+    report = result.get("report") or {}
+    graph = result.get("interaction_graph") or {}
+    temporal = result.get("temporal_model") or {}
+    plan = result.get("deprescribing_plan") or {}
+    errors = result.get("errors") or []
+
+    # Risk summary
+    overall_risk = (
+        report.get("overall_risk_score")
+        or report.get("risk_score")
+        or graph.get("aggregate_risk")
+    )
+    risk_label = report.get("risk_level") or report.get("severity") or "—"
+
+    lines: list[str] = []
+
+    # Header
+    lines.append("# 🧬 ARIA Polypharmacy Analysis")
+    lines.append("")
+    lines.append(f"**Patient:** {_fmt_patient(patient)}")
+    lines.append(f"**Medications ({len(medications)}):** {_fmt_meds(medications)}")
+    lines.append("")
+
+    # Overall risk
+    lines.append("## 📊 Overall Risk")
+    lines.append("")
+    if overall_risk is not None:
+        lines.append(
+            f"{_risk_emoji(overall_risk)} **Risk score:** {overall_risk} / 10"
+            f"{'  •  **Level:** ' + str(risk_label) if risk_label != '—' else ''}"
+        )
+    else:
+        lines.append(f"**Risk level:** {risk_label}")
+    lines.append("")
+
+    # Critical findings / interactions
+    interactions = (
+        graph.get("interactions")
+        or graph.get("edges")
+        or report.get("interactions")
+        or []
+    )
+    if interactions:
+        lines.append("## ⚠️ Drug Interactions")
+        lines.append("")
+        lines.append("| Pair | Severity | Mechanism |")
+        lines.append("|------|----------|-----------|")
+        for ix in interactions[:10]:  # cap at 10 for readability
+            if not isinstance(ix, dict):
+                continue
+            pair = ix.get("pair") or ix.get("drugs") or [
+                ix.get("source", "?"),
+                ix.get("target", "?"),
+            ]
+            if isinstance(pair, list):
+                pair_str = " ↔ ".join(str(p) for p in pair)
+            else:
+                pair_str = str(pair)
+            sev = ix.get("severity") or ix.get("level") or "—"
+            mech = (
+                ix.get("mechanism")
+                or ix.get("description")
+                or ix.get("note")
+                or "—"
+            )
+            # Trim long mechanism text for table readability
+            mech_str = str(mech).replace("\n", " ").strip()
+            if len(mech_str) > 140:
+                mech_str = mech_str[:137] + "…"
+            lines.append(f"| {pair_str} | {sev} | {mech_str} |")
+        if len(interactions) > 10:
+            lines.append("")
+            lines.append(f"_…and {len(interactions) - 10} additional interaction(s)._")
+        lines.append("")
+
+    # Critical findings (text-form)
+    findings = report.get("critical_findings") or report.get("findings") or []
+    if findings:
+        lines.append("## 🩺 Critical Findings")
+        lines.append("")
+        for f in findings[:8]:
+            if isinstance(f, dict):
+                msg = f.get("message") or f.get("text") or json.dumps(f, default=str)
+                sev = f.get("severity")
+                prefix = f"**[{sev}]** " if sev else ""
+                lines.append(f"- {prefix}{msg}")
+            else:
+                lines.append(f"- {f}")
+        lines.append("")
+
+    # Temporal projection
+    timeline = temporal.get("timeline") or temporal.get("events") or []
+    if timeline:
+        lines.append("## ⏱️ Risk Timeline")
+        lines.append("")
+        for ev in timeline[:6]:
+            if not isinstance(ev, dict):
+                continue
+            t = ev.get("time") or ev.get("when") or ev.get("horizon") or "—"
+            desc = ev.get("event") or ev.get("description") or ev.get("risk") or "—"
+            lines.append(f"- **{t}** — {desc}")
+        lines.append("")
+
+    # Deprescribing plan
+    actions = (
+        plan.get("actions")
+        or plan.get("recommendations")
+        or plan.get("steps")
+        or []
+    )
+    if actions:
+        lines.append("## 💊 Deprescribing Plan")
+        lines.append("")
+        for i, a in enumerate(actions[:10], start=1):
+            if isinstance(a, dict):
+                drug = a.get("drug") or a.get("medication") or "—"
+                action = a.get("action") or a.get("recommendation") or "—"
+                rationale = a.get("rationale") or a.get("reason") or ""
+                line = f"{i}. **{drug}** — {action}"
+                if rationale:
+                    line += f"  \n   _Rationale:_ {rationale}"
+                lines.append(line)
+            else:
+                lines.append(f"{i}. {a}")
+        lines.append("")
+
+    # Plan summary / monitoring
+    monitoring = plan.get("monitoring") or report.get("monitoring") or []
+    if monitoring:
+        lines.append("## 🔬 Monitoring Recommendations")
+        lines.append("")
+        for m in monitoring[:8]:
+            lines.append(f"- {m}")
+        lines.append("")
+
+    # Errors (non-fatal pipeline warnings)
+    if errors:
+        lines.append("## ⚙️ Pipeline Notes")
+        lines.append("")
+        for e in errors[:5]:
+            lines.append(f"- _{e}_")
+        lines.append("")
+
+    # If we somehow produced nothing meaningful, fall back to raw JSON so
+    # information isn't lost in the chat UI.
+    rendered = "\n".join(lines).strip()
+    if rendered.count("##") == 0:
+        rendered += (
+            "\n\n_No structured findings returned by the pipeline. "
+            "Raw payload below for debugging:_\n\n"
+            "```json\n"
+            + json.dumps(result, indent=2, default=str)[:3500]
+            + "\n```"
+        )
+
+    rendered += (
+        "\n\n---\n"
+        "_Generated by **ARIA** (Adaptive Risk Intelligence for Polypharmacy "
+        "Assessment) via A2A v1.0._"
+    )
+    return rendered
+
+
 # ── A2A Agent Card Builder (v1 spec) ────────────────────────
 
 
@@ -374,7 +607,12 @@ async def a2a_jsonrpc(request: Request):
 
 
 async def _handle_message_send(rpc: JSONRPCRequest) -> dict[str, Any]:
-    """Process an A2A v1.0 message/send (or alias) request and return a completed Task."""
+    """Process an A2A v1.0 message/send (or alias) request and return a completed Task.
+
+    The artifact text is a Markdown clinical report (not raw JSON) so that
+    chat-style A2A clients like Prompt Opinion render it directly as a rich
+    response instead of summarizing it down to a one-liner.
+    """
     message = rpc.params.get("message", {}) or {}
     parts = message.get("parts", []) or []
 
@@ -397,13 +635,14 @@ async def _handle_message_send(rpc: JSONRPCRequest) -> dict[str, Any]:
 
     try:
         result = await run_pipeline(medications, patient, mcp_client)
+        markdown = _format_pipeline_result_markdown(medications, patient, result)
         return _jsonrpc_result(
             rpc.id,
             _build_task(
                 task_id,
                 context_id,
                 "completed",
-                json.dumps(result, default=str),
+                markdown,
             ),
         )
     except Exception as e:
@@ -443,11 +682,12 @@ async def a2a_task_send_legacy(task: A2ATaskRequest):
 
     try:
         result = await run_pipeline(medications, patient, mcp_client)
+        markdown = _format_pipeline_result_markdown(medications, patient, result)
         return {
             "id": task.id,
             "status": {"state": "completed"},
             "artifacts": [
-                {"parts": [{"text": json.dumps(result, default=str)}]}
+                {"parts": [{"text": markdown}]}
             ],
         }
     except Exception as e:
