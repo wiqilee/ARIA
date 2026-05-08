@@ -31,6 +31,7 @@
   - [Production URLs](#production-urls)
   - [Health Check Endpoints](#health-check-endpoints)
   - [Try It Live (60 seconds, no signup)](#try-it-live-60-seconds-no-signup)
+  - [Multi-Agent Access via A2A v1.0](#multi-agent-access-via-a2a-v10)
   - [Production Deployment Stack](#production-deployment-stack)
 - [The Problem Nobody Has Solved](#the-problem-nobody-has-solved)
 - [What ARIA Does Differently](#what-aria-does-differently)
@@ -109,6 +110,39 @@ curl https://aria-mcp-server-233281205053.asia-southeast2.run.app/health
    - **65F Anticholinergic Burden** returns **8.4 HIGH**
 3. Wait about 10 seconds while the LangGraph agent orchestrates Gemini 2.5 Pro reasoning over Vertex AI
 4. View the rendered 3D interaction graph, phenotype radar, deprescribing waterfall, and exportable PDF clinical report
+
+### Multi-Agent Access via A2A v1.0
+
+ARIA is also exposed as a first-class agent in the Agent2Agent (A2A) v1.0 ecosystem, so other AI agents can call it as a tool without going through the web UI. The A2A Agent publishes its capabilities at `/.well-known/agent-card.json` for automatic discovery, and serves a JSON-RPC 2.0 endpoint at `/a2a/v1` that conforms to the official A2A v1.0 specification.
+
+This means ARIA can be consumed two different ways depending on the use case:
+
+| Path | Best for | URL |
+|---|---|---|
+| **Vercel frontend** | Clinicians, judges, end users who want the full visual experience (3D phenotype graph, risk timeline, deprescribing waterfall, PDF export) | https://aria-polypharmacy.vercel.app |
+| **A2A protocol** | Other agents and orchestration platforms that want to invoke ARIA as a polypharmacy reasoning tool | https://aria-a2a-agent-233281205053.asia-southeast2.run.app/a2a/v1 |
+
+Both paths hit the same backend pipeline (LangGraph orchestrator over MCP Server over Vertex AI), so the clinical reasoning is identical.
+
+#### Verified Interoperability with Prompt Opinion
+
+ARIA has been tested and confirmed working as a connected agent inside [Prompt Opinion](https://promptopinion.ai), a multi-agent collaboration platform. From a Prompt Opinion conversation, an orchestrator agent can delegate a polypharmacy question to ARIA, receive the full structured analysis, and surface it back to the user in the same chat. This validates that ARIA is interoperable with the broader A2A v1.0 ecosystem and not just its own frontend.
+
+For maximum cross-client compatibility, the JSON-RPC endpoint accepts both the official spec method names (`message/send`, `tasks/send`) and the PascalCase variants emitted by some clients (`SendMessage`, `sendMessage`).
+
+#### Quick A2A Smoke Test
+
+```bash
+curl -s -X POST https://aria-a2a-agent-233281205053.asia-southeast2.run.app/a2a/v1 \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc":"2.0","id":"demo-1","method":"message/send",
+    "params":{"message":{"role":"user","messageId":"m1","kind":"message",
+    "parts":[{"kind":"text","text":"{\"medications\":[\"warfarin\",\"aspirin\"],\"patient\":{\"age\":78,\"sex\":\"male\",\"ckd_stage\":3}}"}]}}
+  }' | python3 -m json.tool | head -20
+```
+
+Expected response: a JSON-RPC envelope with `"status": {"state": "completed"}` and an `aria-analysis` artifact containing the full structured polypharmacy report.
 
 ### Production Deployment Stack
 
@@ -1064,7 +1098,7 @@ This project is licensed under the MIT License. See the [LICENSE](LICENSE) file 
 
 **Wiqi Lee**, Data Scientist, AI/ML Researcher, Software Engineer
 
-[![Twitter](https://img.shields.io/badge/Twitter-@wiqi__lee-1DA1F2?logo=twitter)](https://twitter.com/wiqi_lee)
+[![Twitter](https://img.shields.io/badge/X-@wiqi__lee-1DA1F2?logo=twitter)](https://x.com/wiqi_lee)
 [![GitHub](https://img.shields.io/badge/GitHub-wiqilee-181717?logo=github)](https://github.com/wiqilee)
 [![Medium](https://img.shields.io/badge/Medium-Read_Articles-black?logo=medium)](https://medium.com/@YOUR_MEDIUM_HANDLE)
 [![YouTube](https://img.shields.io/badge/Demo_Video-YouTube-red?logo=youtube)](https://youtube.com/YOUR_DEMO_LINK)
