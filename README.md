@@ -328,148 +328,148 @@ sequenceDiagram
 
 ```
 ARIA/
-|
-|-- .github/
-|   |-- workflows/
-|   |   |-- deploy-mcp-server.yml       # CI/CD: Rust build and deploy to Cloud Run (asia-southeast2)
-|   |   |-- deploy-agent.yml            # CI/CD: Python build and deploy to Cloud Run (asia-southeast2)
-|   |   |-- deploy-frontend.yml         # CI/CD: Vercel deploy on push to main
-|   |   |-- test.yml                    # CI: Run all tests on every PR
-|   |-- PULL_REQUEST_TEMPLATE.md        # Standard PR description template
-|
-|-- mcp-server/                         # Rust MCP Server (Google Cloud Run)
-|   |-- src/
-|   |   |-- main.rs                     # Server entrypoint, MCP protocol handler
-|   |   |-- tools/
-|   |   |   |-- mod.rs                  # Tool registry
-|   |   |   |-- check_interactions.rs   # Core interaction detection
-|   |   |   |-- explain_mechanism.rs    # CYP pathway mechanistic reasoning (Gemini 2.5 Pro)
-|   |   |   |-- score_risk.rs           # Patient phenotype risk multiplier
-|   |   |   |-- suggest_alternatives.rs # Evidence-based substitution suggestions
-|   |   |   |-- interaction_graph.rs    # N-drug graph with hub identification
-|   |   |   |-- burden_scores.rs        # Anticholinergic, sedation, QT burden
-|   |   |   |-- temporal_cascade.rs     # Timeline risk cascade modeling
-|   |   |   |-- deprescribing_plan.rs   # Prioritized deprescribing optimizer
-|   |   |   |-- fhir_patient_medications.rs # FHIR R4 medication ingestion (HAPI / partner EHR)
-|   |   |   |-- generate_report.rs      # Structured clinical report output
-|   |   |-- api/
-|   |   |   |-- openfda.rs              # OpenFDA API client
-|   |   |   |-- rxnorm.rs               # RxNorm NIH API client
-|   |   |   |-- pubmed.rs               # PubMed evidence citation client
-|   |   |   |-- drugbank.rs             # DrugBank Open Data client
-|   |   |   |-- fhir.rs                 # FHIR R4 client (HAPI sandbox / partner EHR)
-|   |   |   |-- gemini.rs               # Gemini 2.5 Pro client (Vertex AI + AI Studio dual-mode)
-|   |   |-- models/
-|   |   |   |-- drug.rs                 # Drug struct and normalization
-|   |   |   |-- patient.rs              # PatientContext and phenotype fields
-|   |   |   |-- interaction.rs          # Interaction report types
-|   |   |   |-- risk.rs                 # RiskScore, BurdenScores, CascadeModel
-|   |   |-- llm/
-|   |       |-- mod.rs                  # LLM client abstraction layer
-|   |       |-- reasoning.rs            # All Gemini 2.5 Pro prompt templates
-|   |-- Cargo.toml
-|   |-- Dockerfile                      # Multi-stage Rust build for Cloud Run
-|   |-- .env.example
-|
-|-- agent/                              # Python A2A Agent (Google Cloud Run)
-|   |-- src/
-|   |   |-- main.py                     # Agent entrypoint, FastAPI + A2A handler
-|   |   |-- pipeline/
-|   |   |   |-- __init__.py
-|   |   |   |-- graph.py                # LangGraph state machine definition
-|   |   |   |-- intake.py               # Medication list and context parser
-|   |   |   |-- normalize.py            # RxNorm drug normalization step
-|   |   |   |-- graph_builder.py        # Interaction graph construction step
-|   |   |   |-- phenotype_scorer.py     # Risk multiplier application step
-|   |   |   |-- temporal_modeler.py     # Cascade timeline projection step
-|   |   |   |-- evidence_grader.py      # PubMed evidence attachment step
-|   |   |   |-- plan_generator.py       # Deprescribing plan generation step
-|   |   |   |-- report_builder.py       # Final structured report assembly step
-|   |   |-- mcp_client/
-|   |   |   |-- client.py               # Async HTTP MCP client
-|   |   |   |-- schema.py               # Pydantic models for all tool I/O
-|   |   |-- synthetic/
-|   |       |-- generator.py            # Synthetic patient data generator
-|   |       |-- fixtures/
-|   |           |-- patients.json       # 10 sample synthetic patient profiles
-|   |           |-- medications.json    # 50 sample medication lists
-|   |-- requirements.txt
-|   |-- Dockerfile                      # Google Cloud Run container
-|   |-- .env.example
-|
-|-- frontend/                           # Vercel Frontend (Next.js + React Three Fiber + Framer Motion)
-|   |-- src/
-|   |   |-- app/
-|   |   |   |-- layout.tsx              # Root layout, fonts, global providers
-|   |   |   |-- page.tsx                # Landing / hero page
-|   |   |   |-- globals.css             # CSS variables, base styles, dark theme
-|   |   |   |-- analyze/
-|   |   |   |   |-- page.tsx            # Patient input and analysis page
-|   |   |   |-- report/
-|   |   |   |   |-- page.tsx            # Full clinical report with 3D viz, PDF/HTML export, risk interpretation
-|   |   |   |-- about/
-|   |   |   |   |-- page.tsx            # About page: problem, solution, capabilities, usage, credits
-|   |   |   |-- api/
-|   |   |       |-- analyze/
-|   |   |           |-- route.ts        # Next.js API route, proxies to agent
-|   |   |-- components/
-|   |   |   |-- ui/                     # shadcn/ui base components
-|   |   |   |-- layout/
-|   |   |   |   |-- Navbar.tsx          # Top navigation with animated logo (Home, Analyze, Report, About)
-|   |   |   |   |-- PageTransition.tsx  # Framer Motion page transitions
-|   |   |   |-- 3d/
-|   |   |   |   |-- Scene.tsx           # React Three Fiber Canvas wrapper
-|   |   |   |   |-- HeroBackground.tsx  # Animated 3D hero background
-|   |   |   |   |-- FloatingParticles.tsx    # Ambient molecule / particle field
-|   |   |   |   |-- InteractionGraph3D.tsx   # Force-directed drug interaction graph with hub detection
-|   |   |   |   |-- TemporalTimeline3D.tsx   # Animated 3D risk timeline with intervention windows
-|   |   |   |   |-- PhenotypeRadar3D.tsx     # 3D radar chart with zoom/rotate, per-axis interpretation
-|   |   |   |   |-- DeprescribingWaterfall.tsx # Risk reduction waterfall with priority ordering
-|   |   |   |   |-- PatientAvatar3D.tsx      # 3D patient body with scan animation and auto-rotate
-|   |   |   |-- effects/
-|   |   |   |   |-- CustomCursor.tsx    # Global custom cursor with trail effect
-|   |   |   |   |-- ParticleField.tsx   # Page-level ambient particles
-|   |   |   |   |-- GridBackground.tsx  # Subtle animated grid lines
-|   |   |   |   |-- DataStream.tsx      # Corner data stream / matrix effect
-|   |   |   |-- forms/
-|   |   |   |   |-- PatientForm.tsx     # Medication list and patient context
-|   |   |   |   |-- DrugInput.tsx       # Single drug entry with autocomplete
-|   |   |   |   |-- PatientContextForm.tsx  # Age, sex, CKD stage, comorbidities
-|   |   |   |-- report/
-|   |   |   |   |-- RiskReport.tsx      # Structured report with burden scores, interactions, deprescribing, citations
-|   |   |   |   |-- InteractionCard.tsx # Single interaction detail card
-|   |   |   |   |-- EvidenceBadge.tsx   # A/B/C/D evidence grade badge
-|   |   |   |   |-- SeverityMeter.tsx   # Animated 0-10 risk meter
-|   |   |   |   |-- DeprescribingStep.tsx # Single step in deprescribing plan
-|   |   |   |-- ui/
-|   |   |       |-- GlowCard.tsx        # Card with hover glow border
-|   |   |       |-- GradientButton.tsx  # Button with animated gradient
-|   |   |       |-- LoadingScreen.tsx   # Full-screen ARIA loader
-|   |   |-- lib/
-|   |       |-- api.ts                  # Typed frontend API client
-|   |       |-- types.ts                # Shared TypeScript types
-|   |       |-- theme.ts                # Color tokens, design system constants
-|   |       |-- fonts.ts                # Typography configuration
-|   |-- public/
-|   |   |-- logo/
-|   |       |-- favicon.ico
-|   |-- next.config.ts
-|   |-- tailwind.config.ts              # Custom dark theme, color tokens
-|   |-- vercel.json                     # Vercel config with env var mappings
-|   |-- tsconfig.json
-|   |-- package.json
-|
-|-- docs/
-|   |-- setup.md                        # Full local setup guide
-|   |-- architecture.md                 # System architecture deep dive
-|   |-- api-reference.md                # MCP tool API reference
-|   |-- synthetic-data.md               # Synthetic data schema reference
-|
-|-- .gitignore                          # Rust, Python, Node, env files
-|-- .env.example                        # Root env var reference
-|-- docker-compose.yml                  # Local full-stack dev environment
-|-- LICENSE                             # MIT License
-|-- README.md
+│
+├── .github/
+│   ├── workflows/
+│   │   ├── deploy-mcp-server.yml       # CI/CD: Rust build and deploy to Cloud Run (asia-southeast2)
+│   │   ├── deploy-agent.yml            # CI/CD: Python build and deploy to Cloud Run (asia-southeast2)
+│   │   ├── deploy-frontend.yml         # CI/CD: Vercel deploy on push to main
+│   │   └── test.yml                    # CI: Run all tests on every PR
+│   └── PULL_REQUEST_TEMPLATE.md        # Standard PR description template
+│
+├── mcp-server/                         # Rust MCP Server (Google Cloud Run)
+│   ├── src/
+│   │   ├── main.rs                     # Server entrypoint, MCP protocol handler
+│   │   ├── tools/
+│   │   │   ├── mod.rs                  # Tool registry
+│   │   │   ├── check_interactions.rs   # Core interaction detection
+│   │   │   ├── explain_mechanism.rs    # CYP pathway mechanistic reasoning (Gemini 2.5 Pro)
+│   │   │   ├── score_risk.rs           # Patient phenotype risk multiplier
+│   │   │   ├── suggest_alternatives.rs # Evidence-based substitution suggestions
+│   │   │   ├── interaction_graph.rs    # N-drug graph with hub identification
+│   │   │   ├── burden_scores.rs        # Anticholinergic, sedation, QT burden
+│   │   │   ├── temporal_cascade.rs     # Timeline risk cascade modeling
+│   │   │   ├── deprescribing_plan.rs   # Prioritized deprescribing optimizer
+│   │   │   ├── fhir_patient_medications.rs # FHIR R4 medication ingestion (HAPI / partner EHR)
+│   │   │   └── generate_report.rs      # Structured clinical report output
+│   │   ├── api/
+│   │   │   ├── openfda.rs              # OpenFDA API client
+│   │   │   ├── rxnorm.rs               # RxNorm NIH API client
+│   │   │   ├── pubmed.rs               # PubMed evidence citation client
+│   │   │   ├── drugbank.rs             # DrugBank Open Data client
+│   │   │   ├── fhir.rs                 # FHIR R4 client (HAPI sandbox / partner EHR)
+│   │   │   └── gemini.rs               # Gemini 2.5 Pro client (Vertex AI + AI Studio dual-mode)
+│   │   ├── models/
+│   │   │   ├── drug.rs                 # Drug struct and normalization
+│   │   │   ├── patient.rs              # PatientContext and phenotype fields
+│   │   │   ├── interaction.rs          # Interaction report types
+│   │   │   └── risk.rs                 # RiskScore, BurdenScores, CascadeModel
+│   │   └── llm/
+│   │       ├── mod.rs                  # LLM client abstraction layer
+│   │       └── reasoning.rs            # All Gemini 2.5 Pro prompt templates
+│   ├── Cargo.toml
+│   ├── Dockerfile                      # Multi-stage Rust build for Cloud Run
+│   └── .env.example
+│
+├── agent/                              # Python A2A Agent (Google Cloud Run)
+│   ├── src/
+│   │   ├── main.py                     # Agent entrypoint, FastAPI + A2A handler
+│   │   ├── pipeline/
+│   │   │   ├── __init__.py
+│   │   │   ├── graph.py                # LangGraph state machine definition
+│   │   │   ├── intake.py               # Medication list and context parser
+│   │   │   ├── normalize.py            # RxNorm drug normalization step
+│   │   │   ├── graph_builder.py        # Interaction graph construction step
+│   │   │   ├── phenotype_scorer.py     # Risk multiplier application step
+│   │   │   ├── temporal_modeler.py     # Cascade timeline projection step
+│   │   │   ├── evidence_grader.py      # PubMed evidence attachment step
+│   │   │   ├── plan_generator.py       # Deprescribing plan generation step
+│   │   │   └── report_builder.py       # Final structured report assembly step
+│   │   ├── mcp_client/
+│   │   │   ├── client.py               # Async HTTP MCP client
+│   │   │   └── schema.py               # Pydantic models for all tool I/O
+│   │   └── synthetic/
+│   │       ├── generator.py            # Synthetic patient data generator
+│   │       └── fixtures/
+│   │           ├── patients.json       # 10 sample synthetic patient profiles
+│   │           └── medications.json    # 50 sample medication lists
+│   ├── requirements.txt
+│   ├── Dockerfile                      # Google Cloud Run container
+│   └── .env.example
+│
+├── frontend/                           # Vercel Frontend (Next.js + React Three Fiber + Framer Motion)
+│   ├── src/
+│   │   ├── app/
+│   │   │   ├── layout.tsx              # Root layout, fonts, global providers
+│   │   │   ├── page.tsx                # Landing / hero page
+│   │   │   ├── globals.css             # CSS variables, base styles, dark theme
+│   │   │   ├── analyze/
+│   │   │   │   └── page.tsx            # Patient input and analysis page
+│   │   │   ├── report/
+│   │   │   │   └── page.tsx            # Full clinical report with 3D viz, PDF/HTML export, risk interpretation
+│   │   │   ├── about/
+│   │   │   │   └── page.tsx            # About page: problem, solution, capabilities, usage, credits
+│   │   │   └── api/
+│   │   │       └── analyze/
+│   │   │           └── route.ts        # Next.js API route, proxies to agent
+│   │   ├── components/
+│   │   │   ├── ui/                     # shadcn/ui base components
+│   │   │   ├── layout/
+│   │   │   │   ├── Navbar.tsx          # Top navigation with animated logo (Home, Analyze, Report, About)
+│   │   │   │   └── PageTransition.tsx  # Framer Motion page transitions
+│   │   │   ├── 3d/
+│   │   │   │   ├── Scene.tsx           # React Three Fiber Canvas wrapper
+│   │   │   │   ├── HeroBackground.tsx  # Animated 3D hero background
+│   │   │   │   ├── FloatingParticles.tsx     # Ambient molecule / particle field
+│   │   │   │   ├── InteractionGraph3D.tsx    # Force-directed drug interaction graph with hub detection
+│   │   │   │   ├── TemporalTimeline3D.tsx    # Animated 3D risk timeline with intervention windows
+│   │   │   │   ├── PhenotypeRadar3D.tsx      # 3D radar chart with zoom/rotate, per-axis interpretation
+│   │   │   │   ├── DeprescribingWaterfall.tsx # Risk reduction waterfall with priority ordering
+│   │   │   │   └── PatientAvatar3D.tsx       # 3D patient body with scan animation and auto-rotate
+│   │   │   ├── effects/
+│   │   │   │   ├── CustomCursor.tsx    # Global custom cursor with trail effect
+│   │   │   │   ├── ParticleField.tsx   # Page-level ambient particles
+│   │   │   │   ├── GridBackground.tsx  # Subtle animated grid lines
+│   │   │   │   └── DataStream.tsx      # Corner data stream / matrix effect
+│   │   │   ├── forms/
+│   │   │   │   ├── PatientForm.tsx     # Medication list and patient context
+│   │   │   │   ├── DrugInput.tsx       # Single drug entry with autocomplete
+│   │   │   │   └── PatientContextForm.tsx    # Age, sex, CKD stage, comorbidities
+│   │   │   ├── report/
+│   │   │   │   ├── RiskReport.tsx      # Structured report with burden scores, interactions, deprescribing, citations
+│   │   │   │   ├── InteractionCard.tsx # Single interaction detail card
+│   │   │   │   ├── EvidenceBadge.tsx   # A/B/C/D evidence grade badge
+│   │   │   │   ├── SeverityMeter.tsx   # Animated 0-10 risk meter
+│   │   │   │   └── DeprescribingStep.tsx # Single step in deprescribing plan
+│   │   │   └── ui/
+│   │   │       ├── GlowCard.tsx        # Card with hover glow border
+│   │   │       ├── GradientButton.tsx  # Button with animated gradient
+│   │   │       └── LoadingScreen.tsx   # Full-screen ARIA loader
+│   │   └── lib/
+│   │       ├── api.ts                  # Typed frontend API client
+│   │       ├── types.ts                # Shared TypeScript types
+│   │       ├── theme.ts                # Color tokens, design system constants
+│   │       └── fonts.ts                # Typography configuration
+│   ├── public/
+│   │   └── logo/
+│   │       └── favicon.ico
+│   ├── next.config.ts
+│   ├── tailwind.config.ts              # Custom dark theme, color tokens
+│   ├── vercel.json                     # Vercel config with env var mappings
+│   ├── tsconfig.json
+│   └── package.json
+│
+├── docs/
+│   ├── setup.md                        # Full local setup guide
+│   ├── architecture.md                 # System architecture deep dive
+│   ├── api-reference.md                # MCP tool API reference
+│   └── synthetic-data.md               # Synthetic data schema reference
+│
+├── .gitignore                          # Rust, Python, Node, env files
+├── .env.example                        # Root env var reference
+├── docker-compose.yml                  # Local full-stack dev environment
+├── LICENSE                             # MIT License
+└── README.md
 ```
 
 ---
@@ -1098,7 +1098,7 @@ This project is licensed under the MIT License. See the [LICENSE](LICENSE) file 
 
 **Wiqi Lee**, Data Scientist, AI/ML Researcher, Software Engineer
 
-[![Twitter](https://img.shields.io/badge/X-@wiqi__lee-1DA1F2?logo=twitter)](https://x.com/wiqi_lee)
+[![Twitter](https://img.shields.io/badge/Twitter-@wiqi__lee-1DA1F2?logo=twitter)](https://twitter.com/wiqi_lee)
 [![GitHub](https://img.shields.io/badge/GitHub-wiqilee-181717?logo=github)](https://github.com/wiqilee)
 [![Medium](https://img.shields.io/badge/Medium-Read_Articles-black?logo=medium)](https://medium.com/@YOUR_MEDIUM_HANDLE)
 [![YouTube](https://img.shields.io/badge/Demo_Video-YouTube-red?logo=youtube)](https://youtube.com/YOUR_DEMO_LINK)
