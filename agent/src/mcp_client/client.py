@@ -150,6 +150,31 @@ class MCPClient:
     async def generate_report(self, analysis: dict) -> dict:
         return await self.call_tool("generate_report", {"analysis": analysis})
 
+    async def fhir_patient_medications(
+        self,
+        patient_id: str = "",
+        bearer_token: str = "",
+        server_url: str = "",
+    ) -> dict:
+        """Read a patient's active medications from a FHIR R4 endpoint.
+
+        All three arguments are optional. When omitted, the MCP server falls
+        back to the FHIR_BASE_URL and FHIR_DEFAULT_PATIENT_ID environment
+        variables. Empty bearer means no Authorization header is sent (works
+        for the public HAPI sandbox; production endpoints require a token).
+
+        SHARP Extension Specs values arrive here from the A2A request headers
+        via the agent's middleware. See docs/sharp-integration.md.
+        """
+        args: dict[str, Any] = {}
+        if patient_id:
+            args["patient_id"] = patient_id
+        if bearer_token:
+            args["fhir_bearer_token"] = bearer_token
+        if server_url:
+            args["fhir_server_url"] = server_url
+        return await self.call_tool("fhir_patient_medications", args)
+
 
 class MCPError(Exception):
     """Error from the MCP server."""

@@ -1,10 +1,14 @@
 // mcp-server/src/tools/fhir_patient_medications.rs
 //
 // MCP tool: reads a patient's active medications from a FHIR R4 endpoint.
-// Used to ingest real-world medication lists without the clinician manually
-// typing them. Patient context and bearer token are provided either via
-// SHARP Extension headers (when running under Prompt Opinion) or via env
-// fallback for standalone testing.
+//
+// SHARP Extension Specs propagation:
+//   X-FHIR-Server-URL   -> fhir_server_url    (overrides FHIR_BASE_URL)
+//   X-FHIR-Access-Token -> fhir_bearer_token  (sent as Authorization: Bearer)
+//   X-Patient-ID        -> patient_id         (overrides FHIR_DEFAULT_PATIENT_ID)
+//
+// All three are optional. The agent layer reads them off the inbound A2A
+// request and passes them down as MCP tool arguments. See docs/sharp-integration.md.
 
 use serde::{Deserialize, Serialize};
 use anyhow::{Context, Result};
@@ -12,13 +16,25 @@ use std::env;
 
 #[derive(Debug, Deserialize)]
 pub struct FhirPatientMedicationsInput {
-    /// Patient FHIR resource ID. When empty, falls back to FHIR_DEFAULT_PATIENT_ID.
+    /// Patient FHIR resource ID. Falls back to FHIR_DEFAULT_PATIENT_ID env var
+    /// when empty. Sourced from the X-Patient-ID SHARP header at the agent layer.
     #[serde(default)]
     pub patient_id: String,
-    /// Optional SHARP-propagated bearer token. When empty, no auth is sent
-    /// (works for public HAPI sandbox; production endpoints require a token).
+
+    /// Optional bearer token. When empty, no Authorization header is sent
+    /// (works for the public HAPI sandbox; production endpoints require a
+    /// token). Sourced from the X-FHIR-Access-Token SHARP header at the
+    /// agent layer.
     #[serde(default)]
     pub fhir_bearer_token: String,
+
+    /// Optional per-request FHIR base URL. When empty, falls back to the
+    /// FHIR_BASE_URL env var. Sourced from the X-FHIR-Server-URL SHARP
+    /// header at the agent layer. This is what enables a single ARIA
+    /// deployment to serve callers pointing at different FHIR endpoints
+    /// (Epic, Cerner, HAPI, etc.) without redeploying.
+    #[serde(default)]
+    pub fhir_server_url: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -38,9 +54,17 @@ pub struct FhirMedication {
 }
 
 pub async fn execute(input: FhirPatientMedicationsInput) -> Result<FhirPatientMedicationsOutput> {
-    let base_url = env::var("FHIR_BASE_URL")
-        .unwrap_or_else(|_| "https://hapi.fhir.org/baseR4".to_string());
+    // 1. Resolve the FHIR base URL.
+    //    Priority: explicit tool arg (from SHARP header) > env var > public sandbox.
+    let base_url = if !input.fhir_server_url.is_empty() {
+        input.fhir_server_url
+    } else {
+        env::var("FHIR_BASE_URL")
+            .unwrap_or_else(|_| "https://hapi.fhir.org/baseR4".to_string())
+    };
 
+    // 2. Resolve the patient ID.
+    //    Priority: explicit tool arg (from SHARP header) > env var > error.
     let patient_id = if input.patient_id.is_empty() {
         env::var("FHIR_DEFAULT_PATIENT_ID")
             .context("patient_id not provided and FHIR_DEFAULT_PATIENT_ID unset")?
@@ -48,14 +72,26 @@ pub async fn execute(input: FhirPatientMedicationsInput) -> Result<FhirPatientMe
         input.patient_id
     };
 
-    let url = format!("{base_url}/MedicationRequest?patient={patient_id}&status=active&_count=50");
+    // 3. Build the FHIR query.
+    let url = format!(
+        "{base_url}/MedicationRequest?patient={patient_id}&status=active&_count=50"
+    );
 
     let client = reqwest::Client::new();
     let mut req = client.get(&url)
         .header("Accept", "application/fhir+json");
 
+    // 4. Attach the bearer token when provided.
+    //    The token never appears in logs; reqwest masks it in error output.
     if !input.fhir_bearer_token.is_empty() {
-        req = req.header("Authorization", format!("Bearer {}", input.fhir_bearer_token));
+        // Strip a leading "Bearer " in case the upstream caller already added it,
+        // so we never send "Authorization: Bearer Bearer <token>".
+        let token = input.fhir_bearer_token
+            .strip_prefix("Bearer ")
+            .or_else(|| input.fhir_bearer_token.strip_prefix("bearer "))
+            .unwrap_or(&input.fhir_bearer_token)
+            .trim();
+        req = req.header("Authorization", format!("Bearer {token}"));
     }
 
     let bundle: serde_json::Value = req.send().await?.error_for_status()?.json().await?;
