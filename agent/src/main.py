@@ -12,6 +12,25 @@ Implements FHIR access context propagation through TWO channels:
 Both channels resolve to the same internal context, with Channel 1 taking
 precedence when both are present. See docs/sharp-integration.md for the
 full propagation flow and fallback ladder.
+
+A2A v1.0 lifecycle (working -> completed/failed):
+
+    POST /a2a/v1 message/send
+      → server starts pipeline in background, waits up to
+        PO_BLOCKING_BUDGET_SECONDS for it to finish.
+        - If finished: returns Task state="completed" synchronously
+          (compatible with blocking-only A2A clients).
+        - If not finished: returns Task state="working" with the task_id;
+          background processing continues; client can poll tasks/get.
+
+    POST /a2a/v1 tasks/get
+      → returns the latest stored Task snapshot for the given task_id.
+        Polled until state="completed" (or "failed").
+
+This hybrid lets ARIA stay responsive both to Po (blocking client up to
+~60s) and to standard A2A v1.0 polling clients (no upper bound), without
+the single-call wall-clock budget collapsing the integration when the
+pipeline runs slow due to upstream Gemini latency.
 """
 
 from __future__ import annotations
@@ -22,6 +41,7 @@ import logging
 import os
 import sys
 import uuid
+from collections import OrderedDict
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any
@@ -58,17 +78,22 @@ PUBLIC_AGENT_URL = os.getenv("PUBLIC_AGENT_URL", f"http://{HOST}:{PORT}")
 # A2A protocol version this agent implements.
 A2A_PROTOCOL_VERSION = "1.0"
 
-# Hard ceiling for the pipeline. If the pipeline does not return within this
-# many seconds, we abort and return a "failed" task with a clear error message
-# so Po surfaces it instead of hanging on "Server Agent Responding...".
-#
-# Default raised from 55s -> 180s so that if the GitHub Actions deploy
-# workflow re-deploys without re-applying our env var, we no longer fall
-# back into a too-tight 55s ceiling that fails healthy ~60s pipelines.
-# The Cloud Run request timeout is set to 300s, and Po itself appears to
-# time out around 60s — so 180s gives a wide internal buffer while still
-# bounding hung Gemini calls.
+# Hard ceiling for pipeline execution. After this many seconds the
+# background coroutine is cancelled and the task transitions to "failed".
+# Set generously (3 minutes) — clients with shorter blocking tolerances
+# (like Po) are protected separately by PO_BLOCKING_BUDGET_SECONDS below.
 PIPELINE_TIMEOUT_SECONDS = int(os.getenv("PIPELINE_TIMEOUT_SECONDS", "180"))
+
+# Soft client-blocking budget. When a client calls message/send, we run
+# the pipeline in the background and wait at most this long before
+# responding. If the pipeline finishes inside the budget, we return
+# state="completed" synchronously — that keeps blocking-only A2A clients
+# happy. If the pipeline is still running when the budget expires, we
+# return state="working" with the task id and let the pipeline finish
+# asynchronously; the client can poll tasks/get to retrieve the final
+# state. Tune this just below the client's HTTP timeout (Po's appears
+# to be ~60s for blocking SendA2AMessage calls).
+PO_BLOCKING_BUDGET_SECONDS = int(os.getenv("PO_BLOCKING_BUDGET_SECONDS", "50"))
 
 # Method aliases accepted on the JSON-RPC endpoint.
 A2A_SEND_METHODS = frozenset({
@@ -78,8 +103,13 @@ A2A_SEND_METHODS = frozenset({
     "sendMessage",
 })
 
+A2A_GET_METHODS = frozenset({
+    "tasks/get",
+    "GetTask",
+    "getTask",
+})
+
 # Prompt Opinion's official A2A FHIR Context extension URI.
-# Schema: https://app.promptopinion.ai/schemas/a2a/v1/fhir-context
 PO_FHIR_CONTEXT_EXTENSION_URI = (
     "https://app.promptopinion.ai/schemas/a2a/v1/fhir-context"
 )
@@ -92,6 +122,38 @@ SHARP_HEADER_PATIENT_ID = "X-Patient-ID"
 # ── MCP Client ──────────────────────────────────────────────
 
 mcp_client = MCPClient(MCP_SERVER_URL)
+
+# ── In-memory Task Store ────────────────────────────────────
+
+
+class TaskStore:
+    """Bounded in-memory task store with FIFO eviction.
+
+    A2A clients that don't complete a request synchronously can come
+    back later with tasks/get(taskId) to fetch the final state.
+    Cloud Run instances are short-lived and tasks are ephemeral, so
+    a process-local store is fine for the hackathon scope. For
+    production, swap this for Redis or Memorystore.
+    """
+
+    def __init__(self, max_tasks: int = 1000):
+        self._store: OrderedDict[str, dict[str, Any]] = OrderedDict()
+        self._max = max_tasks
+        self._lock = asyncio.Lock()
+
+    async def set(self, task_id: str, task: dict[str, Any]) -> None:
+        async with self._lock:
+            self._store[task_id] = task
+            self._store.move_to_end(task_id)
+            while len(self._store) > self._max:
+                self._store.popitem(last=False)
+
+    async def get(self, task_id: str) -> dict[str, Any] | None:
+        async with self._lock:
+            return self._store.get(task_id)
+
+
+TASK_STORE = TaskStore()
 
 # ── Lifespan ────────────────────────────────────────────────
 
@@ -112,7 +174,11 @@ async def lifespan(app: FastAPI):
             MCP_SERVER_URL,
         )
     logger.info("Public agent URL: %s", PUBLIC_AGENT_URL)
-    logger.info("Pipeline timeout: %ds", PIPELINE_TIMEOUT_SECONDS)
+    logger.info(
+        "Pipeline timeout: %ds, Po blocking budget: %ds",
+        PIPELINE_TIMEOUT_SECONDS,
+        PO_BLOCKING_BUDGET_SECONDS,
+    )
     yield
     logger.info("ARIA Agent shutting down")
 
@@ -195,15 +261,6 @@ class A2ATaskRequest(BaseModel):
 def _extract_fhir_context_from_extension(
     message: dict[str, Any],
 ) -> dict[str, str]:
-    """Extract FHIR context from the Prompt Opinion A2A Extension payload.
-
-    Schema: https://app.promptopinion.ai/schemas/a2a/v1/fhir-context
-
-    Looks for the extension under message["extensions"] keyed by the
-    PO_FHIR_CONTEXT_EXTENSION_URI. Returns an internal context dict mapped
-    to the same keys used by the SHARP header path, so the rest of the
-    pipeline does not care which channel was used.
-    """
     extensions = message.get("extensions") or {}
     if not isinstance(extensions, dict):
         return {}
@@ -236,11 +293,6 @@ def _extract_fhir_context_from_extension(
 
 
 def _extract_fhir_context_from_headers(request: Request) -> dict[str, str]:
-    """Extract FHIR context from SHARP HTTP headers.
-
-    sharp-on-fhir-mcp compatibility channel. Header names are case-insensitive
-    per RFC 7230, which Starlette/FastAPI already handles.
-    """
     headers = request.headers
     ctx: dict[str, str] = {}
 
@@ -264,17 +316,11 @@ def _extract_fhir_context(
     request: Request,
     message: dict[str, Any] | None = None,
 ) -> dict[str, str]:
-    """Extract FHIR context from both channels with deterministic precedence.
-
-    Precedence: A2A Extension payload (Channel 1) > SHARP headers (Channel 2).
-    Returns the merged context dict. Logs presence only, never values.
-    """
     header_ctx = _extract_fhir_context_from_headers(request)
     extension_ctx = (
         _extract_fhir_context_from_extension(message) if message else {}
     )
 
-    # Channel 1 (extension) wins, Channel 2 (headers) fills gaps.
     merged = {**header_ctx, **extension_ctx}
 
     if merged:
@@ -294,12 +340,6 @@ def _merge_fhir_into_payload(
     payload: dict[str, Any],
     fhir_ctx: dict[str, str],
 ) -> dict[str, Any]:
-    """Merge FHIR context into the parsed message payload.
-
-    FHIR context (from either channel) takes precedence over message-payload
-    values for the same keys. The merged shape is what the LangGraph pipeline
-    and the FHIR MCP tool consume.
-    """
     if not fhir_ctx:
         return payload
 
@@ -316,8 +356,6 @@ def _merge_fhir_into_payload(
         fhir["refresh_token_url"] = fhir_ctx["fhir_refresh_token_url"]
     payload["fhir"] = fhir
 
-    # Also lift patient_id into patient.id so existing pipeline code that reads
-    # patient.id continues to work without modification.
     if "patient_id" in fhir_ctx:
         patient = dict(payload.get("patient") or {})
         patient.setdefault("id", fhir_ctx["patient_id"])
@@ -349,23 +387,31 @@ def _build_task(
     task_id: str,
     context_id: str,
     state: str,
-    text: str,
+    text: str | None = None,
     artifact_name: str = "aria-analysis",
 ) -> dict[str, Any]:
-    """Build an A2A v1.0 Task object."""
-    return {
+    """Build an A2A v1.0 Task object.
+
+    For "working" or "submitted" states, pass text=None to omit artifacts
+    entirely (cleaner shape for poll responses). For "completed" / "failed"
+    pass the text (markdown report or error message).
+    """
+    task: dict[str, Any] = {
         "id": task_id,
         "contextId": context_id,
         "kind": "task",
         "status": {"state": state, "timestamp": _now_iso()},
-        "artifacts": [
+        "artifacts": [],
+    }
+    if text:
+        task["artifacts"] = [
             {
                 "artifactId": str(uuid.uuid4()),
                 "name": artifact_name,
                 "parts": [{"kind": "text", "text": text}],
             }
-        ],
-    }
+        ]
+    return task
 
 
 # ── Markdown Clinical Report Formatter ──────────────────────
@@ -437,9 +483,6 @@ def _format_pipeline_result_markdown(
       - deprescribing_plan.steps              (list[dict])
       - deprescribing_plan.steps[*].monitoring (list[str])
       - deprescribing_plan.warnings           (list[str])
-
-    Legacy field names from earlier pipeline shapes are kept as fallbacks
-    so this formatter remains compatible with older snapshots.
     """
     report = result.get("report") or {}
     graph = result.get("interaction_graph") or {}
@@ -448,7 +491,6 @@ def _format_pipeline_result_markdown(
     raw_ix = result.get("raw_interactions") or {}
     errors = result.get("errors") or []
 
-    # --- Overall risk: derive numeric score from the highest adjusted_score ---
     risk_scores_list = report.get("risk_scores") or []
     overall_risk = None
     if risk_scores_list:
@@ -459,7 +501,6 @@ def _format_pipeline_result_markdown(
         ]
         if scores:
             overall_risk = max(scores)
-    # Fall back to legacy field names if older pipeline output ever appears.
     if overall_risk is None:
         overall_risk = (
             report.get("overall_risk_score")
@@ -474,7 +515,6 @@ def _format_pipeline_result_markdown(
         or "n/a"
     )
 
-    # --- Header ---
     lines: list[str] = []
     lines.append("# 🧬 ARIA Polypharmacy Analysis")
     lines.append("")
@@ -482,7 +522,6 @@ def _format_pipeline_result_markdown(
     lines.append(f"**Medications ({len(medications)}):** {_fmt_meds(medications)}")
     lines.append("")
 
-    # --- Overall risk ---
     lines.append("## 📊 Overall Risk")
     lines.append("")
     if overall_risk is not None:
@@ -494,7 +533,6 @@ def _format_pipeline_result_markdown(
         lines.append(f"**Risk level:** {str(risk_label).upper()}")
     lines.append("")
 
-    # --- Critical findings ---
     findings = report.get("critical_findings") or report.get("findings") or []
     if findings:
         lines.append("## 🩺 Critical Findings")
@@ -509,7 +547,6 @@ def _format_pipeline_result_markdown(
                 lines.append(f"- {f}")
         lines.append("")
 
-    # --- Drug interactions: prefer raw_interactions (rich mechanism) over graph.edges ---
     interactions = (
         raw_ix.get("interactions")
         or graph.get("interactions")
@@ -551,7 +588,6 @@ def _format_pipeline_result_markdown(
             lines.append(f"_...and {len(interactions) - 10} additional interaction(s)._")
         lines.append("")
 
-    # --- Risk timeline: pipeline returns daily_risk + intervention_windows ---
     daily_risk = temporal.get("daily_risk") or []
     windows = temporal.get("intervention_windows") or []
     peak_day = temporal.get("peak_risk_day")
@@ -595,7 +631,6 @@ def _format_pipeline_result_markdown(
             lines.append(f"_{timeline_summary}_")
             lines.append("")
 
-    # --- Deprescribing plan ---
     actions = (
         plan.get("steps")
         or plan.get("actions")
@@ -622,7 +657,6 @@ def _format_pipeline_result_markdown(
                     lines.append(f"   _Rationale:_ {rationale}")
             else:
                 lines.append(f"{i}. {a}")
-        # Plan summary + total expected risk reduction
         total_red = plan.get("total_expected_risk_reduction")
         plan_summary = plan.get("summary")
         if total_red is not None:
@@ -638,7 +672,6 @@ def _format_pipeline_result_markdown(
             lines.append(f"_{plan_summary}_")
         lines.append("")
 
-    # --- Monitoring: flatten from each plan step, then fall back to top-level lists ---
     monitoring: list[str] = []
     for step in actions:
         if isinstance(step, dict):
@@ -654,7 +687,6 @@ def _format_pipeline_result_markdown(
             lines.append(f"- {m}")
         lines.append("")
 
-    # --- Warnings ---
     warnings = plan.get("warnings") or []
     if warnings:
         lines.append("## ⚠️ Warnings")
@@ -663,7 +695,6 @@ def _format_pipeline_result_markdown(
             lines.append(f"- {w}")
         lines.append("")
 
-    # --- Pipeline notes (only if errors were collected) ---
     if errors:
         lines.append("## ⚙️ Pipeline Notes")
         lines.append("")
@@ -673,10 +704,6 @@ def _format_pipeline_result_markdown(
 
     rendered = "\n".join(lines).strip()
 
-    # If somehow we still produced nothing useful, fall back to a debug dump
-    # so judges / clinicians at least see the raw pipeline payload instead of
-    # an empty card. The "## " threshold of <=1 means: only the header was
-    # emitted, no real findings sections.
     if rendered.count("##") <= 1:
         rendered += (
             "\n\n_No structured findings returned by the pipeline. "
@@ -698,11 +725,6 @@ def _format_pipeline_result_markdown(
 
 
 def _build_agent_card() -> dict[str, Any]:
-    """Construct the A2A v1.0 agent card.
-
-    Declares support for both the Prompt Opinion FHIR Context A2A Extension
-    (camelCase JSON) and the SHARP HTTP headers (sharp-on-fhir-mcp).
-    """
     return {
         "name": "ARIA",
         "description": (
@@ -719,14 +741,16 @@ def _build_agent_card() -> dict[str, Any]:
         "capabilities": {
             "streaming": False,
             "pushNotifications": False,
+            # We support the standard A2A v1.0 async lifecycle: a slow
+            # message/send may return state="working" with a task_id, and
+            # the client polls tasks/get to retrieve the eventual result.
+            "asyncTasks": True,
             "experimental": {
-                # Channel 1: Prompt Opinion native A2A Extension.
                 "fhirContextExtension": {
                     "supported": True,
                     "uri": PO_FHIR_CONTEXT_EXTENSION_URI,
                     "required": False,
                 },
-                # Channel 2: SHARP HTTP headers.
                 "sharpExtensions": {
                     "supported": True,
                     "headers": [
@@ -738,7 +762,6 @@ def _build_agent_card() -> dict[str, Any]:
                 },
             },
         },
-        # Declare the extension so Prompt Opinion knows to populate it.
         "extensions": [
             {
                 "uri": PO_FHIR_CONTEXT_EXTENSION_URI,
@@ -808,22 +831,54 @@ async def _run_pipeline_with_timeout(
     patient: Any,
     fhir_ctx: dict[str, Any],
 ) -> dict[str, Any]:
-    """Run the pipeline with a hard timeout to prevent hanging clients.
-
-    If the pipeline does not finish in PIPELINE_TIMEOUT_SECONDS, raise
-    asyncio.TimeoutError so the caller can return a clear "failed" task
-    instead of letting Po hang on "Server Agent Responding..." indefinitely.
-    """
+    """Run the pipeline with a hard timeout."""
     async def _inner() -> dict[str, Any]:
         try:
             return await run_pipeline(
                 medications, patient, mcp_client, fhir_context=fhir_ctx or None
             )
         except TypeError:
-            # Backward compat for older run_pipeline signatures
             return await run_pipeline(medications, patient, mcp_client)
 
     return await asyncio.wait_for(_inner(), timeout=PIPELINE_TIMEOUT_SECONDS)
+
+
+async def _run_pipeline_and_store(
+    task_id: str,
+    context_id: str,
+    medications: list,
+    patient: Any,
+    fhir_ctx: dict[str, Any],
+) -> None:
+    """Run the pipeline and store the resulting Task state.
+
+    Always writes a final state (completed or failed) to TASK_STORE so a
+    polling client always gets a valid response from tasks/get.
+    """
+    try:
+        result = await _run_pipeline_with_timeout(medications, patient, fhir_ctx)
+        markdown = _format_pipeline_result_markdown(medications, patient, result)
+        await TASK_STORE.set(
+            task_id, _build_task(task_id, context_id, "completed", markdown)
+        )
+        logger.info("A2A async: task %s completed", task_id)
+    except asyncio.TimeoutError:
+        msg = (
+            f"⏱️ ARIA analysis timed out after {PIPELINE_TIMEOUT_SECONDS} seconds. "
+            f"This usually happens when the Gemini reasoning or upstream APIs "
+            f"are slow. Please try again with fewer medications, or hit the "
+            f"REST endpoint directly:\n\n`POST {PUBLIC_AGENT_URL}/analyze`"
+        )
+        await TASK_STORE.set(
+            task_id, _build_task(task_id, context_id, "failed", msg)
+        )
+        logger.error("A2A async: task %s timed out", task_id)
+    except Exception as e:
+        msg = f"❌ Analysis failed: {type(e).__name__}: {e}"
+        await TASK_STORE.set(
+            task_id, _build_task(task_id, context_id, "failed", msg)
+        )
+        logger.error("A2A async: task %s failed: %s", task_id, e, exc_info=True)
 
 
 # ── Routes ──────────────────────────────────────────────────
@@ -886,8 +941,9 @@ async def agent_card_standard():
 async def a2a_jsonrpc(request: Request):
     """A2A v1.0 JSON-RPC 2.0 endpoint.
 
-    Reads FHIR context from BOTH channels (extension + headers) and
-    propagates it into the message payload before running the pipeline.
+    Dispatches both message-send (message/send, tasks/send, SendMessage)
+    and task-get (tasks/get, GetTask) methods. Reads FHIR context from
+    BOTH channels (extension + headers) for send methods.
     """
     try:
         raw = await request.json()
@@ -910,6 +966,9 @@ async def a2a_jsonrpc(request: Request):
     if rpc.method in A2A_SEND_METHODS:
         return await _handle_message_send(rpc, request)
 
+    if rpc.method in A2A_GET_METHODS:
+        return await _handle_tasks_get(rpc)
+
     return _jsonrpc_error(rpc.id, -32601, f"Method not found: {rpc.method}")
 
 
@@ -917,16 +976,21 @@ async def _handle_message_send(
     rpc: JSONRPCRequest,
     request: Request,
 ) -> dict[str, Any]:
-    """Process an A2A v1.0 message/send request and return a completed Task.
+    """Handle A2A v1.0 message/send with hybrid blocking + async lifecycle.
 
-    Critical fix: wraps run_pipeline in asyncio.wait_for so a hanging Gemini
-    or MCP call cannot leave Po waiting forever on "Server Agent Responding...".
-    On timeout, returns a Task with state=failed and a clear diagnostic message.
+    1. Extract payload + FHIR context.
+    2. If no medications and no FHIR patient — fail fast synchronously.
+    3. Otherwise: write initial "working" task to TASK_STORE, schedule
+       background pipeline, then wait up to PO_BLOCKING_BUDGET_SECONDS
+       for it to finish.
+    4. Whatever state the task is in when the budget expires (or earlier
+       if the pipeline finished) is returned. asyncio.shield ensures the
+       background coroutine keeps running past our wait_for so polling
+       clients eventually see the completed/failed state.
     """
     message = rpc.params.get("message", {}) or {}
     parts = message.get("parts", []) or []
 
-    # Extract FHIR context from BOTH channels (extension wins, headers fill gaps)
     fhir_ctx = _extract_fhir_context(request, message)
 
     payload = _parse_message_content(parts)
@@ -937,60 +1001,84 @@ async def _handle_message_send(
     context_id = message.get("contextId") or str(uuid.uuid4())
 
     if not medications and not pipeline_fhir.get("patient_id"):
+        validation_msg = (
+            "No medications and no FHIR patient context provided. "
+            "Send JSON with a 'medications' array, or supply the "
+            "FHIR Context A2A Extension, or SHARP headers "
+            "(X-Patient-ID, X-FHIR-Access-Token)."
+        )
         return _jsonrpc_result(
-            rpc.id,
-            _build_task(
-                task_id,
-                context_id,
-                "failed",
-                "No medications and no FHIR patient context provided. "
-                "Send JSON with a 'medications' array, or supply the "
-                "FHIR Context A2A Extension, or SHARP headers "
-                "(X-Patient-ID, X-FHIR-Access-Token).",
-            ),
+            rpc.id, _build_task(task_id, context_id, "failed", validation_msg)
         )
 
+    # Seed an initial "working" record so anyone polling tasks/get
+    # before the background coroutine starts still gets a valid Task.
+    await TASK_STORE.set(task_id, _build_task(task_id, context_id, "working"))
+
+    # Kick off the pipeline as a background task. _run_pipeline_and_store
+    # writes the final state to TASK_STORE itself, so we don't need to
+    # await its return value — only its completion (which we may or may
+    # not see within the blocking budget).
+    pipeline_task = asyncio.create_task(
+        _run_pipeline_and_store(
+            task_id, context_id, medications, patient, pipeline_fhir
+        )
+    )
+
+    # Try to give blocking-only A2A clients (e.g. those that don't poll
+    # tasks/get) a fully-completed Task in this same response. asyncio
+    # .shield prevents the background task from being cancelled when our
+    # wait_for hits the budget — the pipeline keeps running, and a
+    # subsequent tasks/get will see the eventual completed state.
     try:
-        result = await _run_pipeline_with_timeout(medications, patient, pipeline_fhir)
-        markdown = _format_pipeline_result_markdown(medications, patient, result)
-        return _jsonrpc_result(
-            rpc.id,
-            _build_task(task_id, context_id, "completed", markdown),
+        await asyncio.wait_for(
+            asyncio.shield(pipeline_task),
+            timeout=PO_BLOCKING_BUDGET_SECONDS,
+        )
+        logger.info(
+            "A2A: task %s finished within %ds blocking budget",
+            task_id, PO_BLOCKING_BUDGET_SECONDS,
         )
     except asyncio.TimeoutError:
-        logger.error(
-            "A2A pipeline timed out after %ds (medications=%d)",
-            PIPELINE_TIMEOUT_SECONDS,
-            len(medications),
+        logger.info(
+            "A2A: task %s exceeded %ds blocking budget — returning 'working' "
+            "for client to poll tasks/get",
+            task_id, PO_BLOCKING_BUDGET_SECONDS,
         )
-        return _jsonrpc_result(
-            rpc.id,
-            _build_task(
-                task_id,
-                context_id,
-                "failed",
-                f"⏱️ ARIA analysis timed out after {PIPELINE_TIMEOUT_SECONDS} seconds. "
-                f"This usually happens when the Gemini reasoning or upstream APIs are slow. "
-                f"Please try again with fewer medications, or hit the REST endpoint directly:\n\n"
-                f"`POST {PUBLIC_AGENT_URL}/analyze`",
-            ),
+
+    final_task = await TASK_STORE.get(task_id)
+    if final_task is None:
+        # Defensive: should not happen since we seeded "working" above.
+        final_task = _build_task(task_id, context_id, "working")
+    return _jsonrpc_result(rpc.id, final_task)
+
+
+async def _handle_tasks_get(rpc: JSONRPCRequest) -> dict[str, Any]:
+    """Handle A2A v1.0 tasks/get — return latest snapshot for a task id."""
+    task_id = (
+        rpc.params.get("id")
+        or rpc.params.get("taskId")
+        or rpc.params.get("task_id")
+    )
+    if not task_id or not isinstance(task_id, str):
+        return _jsonrpc_error(rpc.id, -32602, "Missing or invalid task id in tasks/get params")
+
+    task = await TASK_STORE.get(task_id)
+    if task is None:
+        return _jsonrpc_error(
+            rpc.id, -32602, f"Task not found: {task_id} (may have been evicted)"
         )
-    except Exception as e:
-        logger.error("A2A pipeline failed: %s", e, exc_info=True)
-        return _jsonrpc_result(
-            rpc.id,
-            _build_task(
-                task_id,
-                context_id,
-                "failed",
-                f"❌ Analysis failed: {type(e).__name__}: {e}",
-            ),
-        )
+
+    logger.info(
+        "A2A: tasks/get id=%s state=%s",
+        task_id, (task.get("status") or {}).get("state"),
+    )
+    return _jsonrpc_result(rpc.id, task)
 
 
 @app.post("/a2a/tasks/send")
 async def a2a_task_send_legacy(task: A2ATaskRequest, http_request: Request):
-    """Legacy A2A task send endpoint. Kept for backward compatibility."""
+    """Legacy A2A task send endpoint. Sync blocking, no async lifecycle."""
     message = task.message if isinstance(task.message, dict) else {}
     parts = message.get("parts", []) if isinstance(message, dict) else []
     fhir_ctx = _extract_fhir_context(http_request, message)
