@@ -3,7 +3,7 @@
 # ARIA
 ### Adaptive Risk Intelligence for Polypharmacy Assessment
 
-**An AI agent system that does not just detect drug interactions. It reasons about them.**
+**An AI agent that does not just detect drug interactions. It reasons about them.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/Rust-MCP_Server-orange?logo=rust)](https://www.rust-lang.org/)
@@ -11,7 +11,7 @@
 [![Google Cloud Run](https://img.shields.io/badge/Google_Cloud-Run_asia--southeast2-4285F4?logo=googlecloud)](https://cloud.google.com/run)
 [![Gemini](https://img.shields.io/badge/Gemini-2.5_Pro-8E75B2?logo=googlegemini)](https://deepmind.google/technologies/gemini/)
 [![Vercel](https://img.shields.io/badge/Deployed_on-Vercel-black?logo=vercel)](https://aria-polypharmacy.vercel.app/)
-[![Prompt Opinion](https://img.shields.io/badge/Prompt_Opinion-Marketplace-green)](https://app.promptopinion.ai)
+[![Prompt Opinion](https://img.shields.io/badge/Prompt_Opinion-View_on_Marketplace-green)](https://app.promptopinion.ai/marketplace/agent/019e07f1-1952-7b07-8a90-4274fdbe8b49)
 
 [![Medium](https://img.shields.io/badge/Read_on-Medium-black?logo=medium)](https://medium.com/@YOUR_MEDIUM_HANDLE)
 [![X](https://img.shields.io/badge/@wiqi__lee-000000?logo=x)](https://x.com/wiqi_lee)
@@ -19,7 +19,7 @@
 
 <br/>
 
-> Over 90% of drug interaction alerts are ignored by clinicians. Not because they are reckless, but because existing tools deliver undifferentiated noise with zero actionable context. ARIA fixes this.
+> Clinicians override more than 90% of drug interaction alerts. Not because they are reckless, but because every existing tool delivers the same context-free noise. ARIA is the fix.
 
 </div>
 
@@ -27,29 +27,32 @@
 
 ## Table of Contents
 
+- [The Problem](#the-problem)
+- [The Solution](#the-solution)
+- [The Impact](#the-impact)
+- [What Makes ARIA Different](#what-makes-aria-different)
+  - [Ten Capabilities You Will Not Find Anywhere Else](#ten-capabilities-you-will-not-find-anywhere-else)
+  - [Novelty Comparison](#novelty-comparison)
+- [System Architecture](#system-architecture)
+  - [System Overview](#system-overview)
+  - [Agent Reasoning Pipeline](#agent-reasoning-pipeline)
+  - [Service-to-Service Communication](#service-to-service-communication)
+  - [CI/CD Pipeline](#cicd-pipeline)
 - [Live Deployment](#live-deployment)
   - [Production URLs](#production-urls)
   - [Health Check Endpoints](#health-check-endpoints)
-  - [Try It Live (60 seconds, no signup)](#try-it-live-60-seconds-no-signup)
+  - [Try It Live in 60 Seconds](#try-it-live-in-60-seconds)
   - [Multi-Agent Access via A2A v1.0](#multi-agent-access-via-a2a-v10)
   - [Production Deployment Stack](#production-deployment-stack)
-- [The Problem Nobody Has Solved](#the-problem-nobody-has-solved)
-- [What ARIA Does Differently](#what-aria-does-differently)
-  - [Ten Capabilities That Do Not Exist Anywhere Else](#ten-capabilities-that-do-not-exist-anywhere-else)
-- [Architecture](#architecture)
-  - [System Overview](#system-overview)
-  - [Agent Reasoning Pipeline](#agent-reasoning-pipeline)
-  - [CI/CD Pipeline](#cicd-pipeline)
-  - [Service-to-Service Communication](#service-to-service-communication)
+- [Prompt Opinion Marketplace Integration](#prompt-opinion-marketplace-integration)
+  - [Integration Flow](#integration-flow)
+  - [SHARP Extension Specs](#sharp-extension-specs)
+  - [Marketplace Listing](#marketplace-listing)
 - [Project Structure](#project-structure)
 - [LLM Configuration](#llm-configuration)
 - [Stack](#stack)
   - [MCP Tools Exposed](#mcp-tools-exposed)
   - [Frontend Design System](#frontend-design-system)
-- [Prompt Opinion Marketplace Integration](#prompt-opinion-marketplace-integration)
-  - [Integration Flow](#integration-flow)
-  - [SHARP Extension Specs](#sharp-extension-specs)
-  - [Marketplace Listing](#marketplace-listing)
 - [Google Cloud Setup (asia-southeast2)](#google-cloud-setup-asia-southeast2)
 - [CI/CD and Deployment](#cicd-and-deployment)
   - [GitHub Actions: MCP Server](#github-actions-mcp-server)
@@ -59,8 +62,6 @@
   - [Vercel Configuration](#vercel-configuration)
   - [Required GitHub Secrets](#required-github-secrets)
 - [Getting Started (Local Development)](#getting-started-local-development)
-- [Why This Matters](#why-this-matters)
-- [Novelty Table](#novelty-table)
 - [Data and Privacy](#data-and-privacy)
 - [Roadmap](#roadmap)
 - [License](#license)
@@ -68,173 +69,118 @@
 
 ---
 
-## Live Deployment
-
-ARIA is fully deployed and accessible to judges and reviewers right now. All endpoints below are public and do not require authentication for read access.
-
-### Production URLs
-
-| Component | Base URL | Health Check | Status |
-|---|---|---|---|
-| **Frontend (Vercel)** | [aria-polypharmacy.vercel.app](https://aria-polypharmacy.vercel.app) | — | Live |
-| **A2A Agent (Cloud Run)** | [aria-a2a-agent-233281205053.asia-southeast2.run.app](https://aria-a2a-agent-233281205053.asia-southeast2.run.app) | [`/health`](https://aria-a2a-agent-233281205053.asia-southeast2.run.app/health) | Live |
-| **MCP Server (Cloud Run)** | [aria-mcp-server-233281205053.asia-southeast2.run.app](https://aria-mcp-server-233281205053.asia-southeast2.run.app) | [`/health`](https://aria-mcp-server-233281205053.asia-southeast2.run.app/health) | Live |
-
-| Setting | Value |
-|---|---|
-| **GCP Project** | `aria-2026-ai` (project number `233281205053`) |
-| **Cloud Run Region** | `asia-southeast2` (Jakarta) — A2A Agent and MCP Server |
-| **Vertex AI Region** | `us-central1` — Gemini 2.5 Pro calls only |
-
-> **Note:** The links in the **Health Check** column return the canonical
-> JSON health payload expected by judges and uptime monitors. The base URLs
-> are shown for reference (e.g. for use as `PUBLIC_AGENT_URL` in client
-> configuration); they are not intended to be opened in a browser.
-
-### Health Check Endpoints
-
-Judges can verify the deployment is live by hitting these public endpoints:
-
-```bash
-# Frontend
-curl -I https://aria-polypharmacy.vercel.app
-# Expected: HTTP/2 200
-
-# A2A Agent (Python LangGraph orchestrator)
-curl https://aria-a2a-agent-233281205053.asia-southeast2.run.app/health
-# Expected: {"status":"healthy","service":"aria-agent","mcp_server":"connected", ...}
-
-# MCP Server (Rust drug knowledge backend)
-curl https://aria-mcp-server-233281205053.asia-southeast2.run.app/health
-# Expected: {"service":"aria-mcp-server","status":"healthy","version":"0.1.0"}
-```
-
-### Try It Live (60 seconds, no signup)
-
-1. Open https://aria-polypharmacy.vercel.app/analyze
-2. Click any **Quick Test** preset:
-   - **72F CKD3** returns risk score **9.6 CRITICAL**
-   - **81M Cardiac** returns **8.3 HIGH**
-   - **65F Anticholinergic Burden** returns **8.4 HIGH**
-3. Wait about 10 seconds while the LangGraph agent orchestrates Gemini 2.5 Pro reasoning over Vertex AI
-4. View the rendered 3D interaction graph, phenotype radar, deprescribing waterfall, and exportable PDF clinical report
-
-### Multi-Agent Access via A2A v1.0
-
-ARIA is also exposed as a first-class agent in the Agent2Agent (A2A) v1.0 ecosystem, so other AI agents can call it as a tool without going through the web UI. The A2A Agent publishes its capabilities at `/.well-known/agent-card.json` for automatic discovery, and serves a JSON-RPC 2.0 endpoint at `/a2a/v1` that conforms to the official A2A v1.0 specification.
-
-This means ARIA can be consumed two different ways depending on the use case:
-
-| Path | Best for | URL |
-|---|---|---|
-| **Vercel frontend** | Clinicians, judges, end users who want the full visual experience (3D phenotype graph, risk timeline, deprescribing waterfall, PDF export) | https://aria-polypharmacy.vercel.app |
-| **A2A protocol** | Other agents and orchestration platforms that want to invoke ARIA as a polypharmacy reasoning tool | https://aria-a2a-agent-233281205053.asia-southeast2.run.app/a2a/v1 |
-
-Both paths hit the same backend pipeline (LangGraph orchestrator over MCP Server over Vertex AI), so the clinical reasoning is identical.
-
-#### Verified Interoperability with Prompt Opinion
-
-ARIA has been tested and confirmed working as a connected agent inside [Prompt Opinion](https://promptopinion.ai), a multi-agent collaboration platform. From a Prompt Opinion conversation, an orchestrator agent can delegate a polypharmacy question to ARIA, receive the full structured analysis, and surface it back to the user in the same chat. This validates that ARIA is interoperable with the broader A2A v1.0 ecosystem and not just its own frontend.
-
-For maximum cross-client compatibility, the JSON-RPC endpoint accepts both the official spec method names (`message/send`, `tasks/send`) and the PascalCase variants emitted by some clients (`SendMessage`, `sendMessage`).
-
-#### Quick A2A Smoke Test
-
-```bash
-curl -s -X POST https://aria-a2a-agent-233281205053.asia-southeast2.run.app/a2a/v1 \
-  -H "Content-Type: application/json" \
-  -d '{
-    "jsonrpc":"2.0","id":"demo-1","method":"message/send",
-    "params":{"message":{"role":"user","messageId":"m1","kind":"message",
-    "parts":[{"kind":"text","text":"{\"medications\":[\"warfarin\",\"aspirin\"],\"patient\":{\"age\":78,\"sex\":\"male\",\"ckd_stage\":3}}"}]}}
-  }' | python3 -m json.tool | head -20
-```
-
-Expected response: a JSON-RPC envelope with `"status": {"state": "completed"}` and an `aria-analysis` artifact containing the full structured polypharmacy report.
-
-### Production Deployment Stack
-
-- **LLM**: Gemini 2.5 Pro via Vertex AI in `us-central1` (no API keys, uses GCP IAM)
-- **Authentication**: Default compute service account with `roles/aiplatform.user` and `roles/secretmanager.secretAccessor`
-- **Secrets**: OpenFDA API key stored in GCP Secret Manager, mounted into the Agent at runtime as `OPENFDA_API_KEY`
-- **Container Registry**: Artifact Registry at `asia-southeast2-docker.pkg.dev/aria-2026-ai/aria-images`
-- **Frontend**: Next.js 15 on Vercel with `NEXT_PUBLIC_AGENT_URL` pointing to the Cloud Run agent
-- **CI/CD**: GitHub Actions workflows in `.github/workflows/` auto-deploy on push to `main`
-
-> **Note on Vertex AI region.** Cloud Run services are hosted in `asia-southeast2` (Jakarta) for low latency to Southeast Asian users, while Vertex AI calls are routed to `us-central1` because Gemini 2.5 Pro is not yet available in `asia-southeast2`. The added cross-region latency is roughly 200 ms per call, which is acceptable for the deliberative, non-interactive reasoning ARIA performs.
-
----
-
-## The Problem Nobody Has Solved
+## The Problem
 
 This is not an American problem. It is not a European problem. It is a global one.
 
-According to the [WHO 2024 publication on the global burden of preventable medication harm](https://www.who.int/publications/i/item/9789240088887), medication errors cost the world an estimated **$42 billion USD every year**, nearly 1% of total global health expenditure. Half of all preventable harm in medical care worldwide is medication-related, and a quarter of those cases are severe or life-threatening.
+Medication errors cost the world about [$42 billion every year](https://www.who.int/publications/i/item/9789240088887), close to 1% of global health spending. Half of all preventable harm in medical care is medication-related, and a quarter of those cases are severe or life-threatening. In low- and middle-income countries, the impact is roughly twice as severe in healthy life years lost. A [2025 systematic review in PLOS One](https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0322392) found that Africa and Southeast Asia carry some of the highest rates of preventable medication harm in the world, made worse by pharmacies that operate without a pharmacist on site.
 
-In low- and middle-income countries (LMICs), the impact is estimated to be **twice as severe** in terms of healthy life years lost compared to high-income countries. A [2025 systematic review in PLOS One](https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0322392) found that Africa and Southeast Asia have some of the highest rates of preventable medication harm globally, compounded by pharmacies operating with no pharmacist on site at all.
+The driver behind a large share of this harm is **polypharmacy**, defined as taking five or more medications at the same time. Two 2024 meta-analyses put a number on it. A [review in Pharmacoepidemiology and Drug Safety](https://pubmed.ncbi.nlm.nih.gov/39135518/) found global polypharmacy prevalence among adults 60 and older at **39.1%**. An [umbrella review in Archives of Gerontology and Geriatrics](https://pubmed.ncbi.nlm.nih.gov/38733922/) covering 295 studies and nearly 60 million participants across 41 countries found general population prevalence at **37%**, rising to **52% among inpatients** and **59% among frail elderly individuals**. Polypharmacy reaches 48% in China and 49% in India ([Nature Scientific Reports, 2023](https://www.nature.com/articles/s41598-023-45095-2)) and is well documented across Southeast Asia, Indonesia included. [StatPearls (2024)](https://www.ncbi.nlm.nih.gov/books/NBK519065/) adds that medication errors are 30% more likely in patients on five or more drugs and 38% more likely in patients aged 75 and older.
 
-The driver behind a large share of this harm is **polypharmacy**: the simultaneous use of five or more medications. Two major 2024 meta-analyses quantify how widespread this is. A [review in Pharmacoepidemiology and Drug Safety](https://pubmed.ncbi.nlm.nih.gov/39135518/) found global polypharmacy prevalence among adults aged 60 and older at **39.1%**. A separate [umbrella review in Archives of Gerontology and Geriatrics](https://pubmed.ncbi.nlm.nih.gov/38733922/) covering 295 studies and nearly 60 million participants across 41 countries found general population prevalence at **37%**, rising to **52% among inpatients** and **59% among frail elderly individuals**. Polypharmacy prevalence reaches 48% in China and 49% in India ([Nature Scientific Reports, 2023](https://www.nature.com/articles/s41598-023-45095-2)), and has been documented across Southeast Asia, including Indonesia. [StatPearls (2024)](https://www.ncbi.nlm.nih.gov/books/NBK519065/) adds that medication errors are **30% more likely** in patients on five or more drugs and **38% more likely** in those aged 75 and older.
+The tools built to catch these interactions are static lookup tables with warning labels. They tell a clinician that Drug A and Drug B interact. They do not answer the questions that actually matter at the bedside:
 
-The tools built to catch these interactions are failing patients in every country. They are static lookup tables with warning labels. They tell a clinician that Drug A and Drug B interact. They do not answer the questions that actually matter:
-
-- **How dangerous** is this, for this specific patient, given their age, kidney function, and clinical history?
-- **When** on the clinical timeline will the risk actually peak?
+- **How dangerous** is this interaction for *this specific patient*, given their age, kidney function, and clinical history?
+- **When** on the clinical timeline will the risk peak?
 - **Why** does this interaction occur at the biochemical level?
-- **What** should be done first, when a patient has six conflicting interactions at once?
+- **What** should the clinician do first when the patient has six conflicting interactions at once?
 
-The result is **alert fatigue**. Clinicians see so many identical, context-free warnings that studies show they override more than 90% of all drug interaction alerts. The tools designed to protect patients have become background noise, in every clinic, in every country.
+The result is **alert fatigue**. Clinicians see so many identical, context-free warnings that they override more than 90% of all drug interaction alerts. The tools designed to protect patients have become background noise.
 
-No one has built a system that reasons about risk. Until now.
+No one has built a system that reasons about risk. So we did.
 
 ---
 
-## What ARIA Does Differently
+## The Solution
 
-ARIA is not a drug interaction checker. It is a **clinical reasoning engine**: a hybrid AI agent system that understands context, mechanism, time, and patient phenotype.
+ARIA is not another drug interaction checker. It is a **clinical reasoning engine** built as a hybrid AI agent system that understands context, mechanism, time, and patient phenotype.
 
-### Ten Capabilities That Do Not Exist Anywhere Else
+A clinician feeds ARIA a medication list and a patient context (age, sex, CKD stage, hepatic function, comorbidities). ARIA returns a structured clinical report that includes:
+
+- A patient-specific risk score on a 0 to 10 scale, with clinical interpretation
+- An N-drug interaction graph that identifies the **hub drug** causing most of the conflicts
+- Three-way and emergent interactions that pairwise checkers cannot see
+- A mechanistic explanation for every interaction at the CYP, renal, or microbiome level, generated by Gemini 2.5 Pro
+- A temporal cascade that predicts when each risk will peak
+- Cumulative burden scores for anticholinergic load, sedation, and QT prolongation
+- A prioritized deprescribing plan: which drug to address first, what to substitute, what labs to monitor
+- Every claim is backed by an evidence grade (A through D) and a PubMed citation
+
+The same reasoning pipeline is exposed in three ways:
+
+1. A **Vercel frontend** at [aria-polypharmacy.vercel.app](https://aria-polypharmacy.vercel.app) for clinicians who want the full 3D visual experience
+2. An **A2A v1.0 agent** at `aria-a2a-agent-233281205053.asia-southeast2.run.app/a2a/v1` so other agents can call ARIA as a tool
+3. A **Prompt Opinion Marketplace** listing where ARIA participates in multi-agent clinical workflows alongside other healthcare agents
+
+All three paths hit the same backend, so the clinical reasoning is identical regardless of how ARIA is invoked.
+
+---
+
+## The Impact
+
+| Metric | Value | Source |
+|---|---|---|
+| Global cost of medication errors per year | $42 billion USD | [WHO, 2024](https://www.who.int/publications/i/item/9789240088887) |
+| Share of preventable medical harm that is medication-related | 50% | [WHO, 2022](https://www.who.int/news/item/16-09-2022-who-calls-for-urgent-action-by-countries-for-achieving-medication-without-harm) |
+| Patients harmed by medications | 1 in 20 hospital admissions | [WHO, 2024](https://www.who.int/publications/i/item/9789240088887) |
+| Global polypharmacy prevalence, general population | 37% | [Kim et al., Arch Gerontol Geriatr, 2024](https://pubmed.ncbi.nlm.nih.gov/38733922/) |
+| Global polypharmacy prevalence, adults 60+ | 39.1% | [Wang et al., Pharmacoepidemiol Drug Saf, 2024](https://pubmed.ncbi.nlm.nih.gov/39135518/) |
+| Polypharmacy among inpatients globally | 52% | [Kim et al., Arch Gerontol Geriatr, 2024](https://pubmed.ncbi.nlm.nih.gov/38733922/) |
+| Polypharmacy in older adults, China | 48% | [Nature Scientific Reports, 2023](https://www.nature.com/articles/s41598-023-45095-2) |
+| Polypharmacy in older adults, India | 49% | [Nature Scientific Reports, 2023](https://www.nature.com/articles/s41598-023-45095-2) |
+| Polypharmacy in older adults, Ethiopia | 37% | [Nature Scientific Reports, 2023](https://www.nature.com/articles/s41598-023-45095-2) |
+| Higher medication-error risk on 5+ drugs | 30% higher incidence | [StatPearls, 2024](https://www.ncbi.nlm.nih.gov/books/NBK519065/) |
+| Drug interaction alerts overridden by clinicians | Over 90% | Clinical literature |
+| Medication-error impact in LMICs vs. high-income countries | 2x higher healthy life years lost | [WHO, 2017](https://www.who.int/news/item/29-03-2017-who-launches-global-effort-to-halve-medication-related-errors-in-5-years) |
+
+Alert fatigue is not a behavior problem. It is a tool design problem. ARIA is the fix, built for every health system, everywhere.
+
+---
+
+## What Makes ARIA Different
+
+### Ten Capabilities You Will Not Find Anywhere Else
 
 #### 1. Temporal Cascade Modeling
-Drug interactions do not manifest instantly. They evolve. ARIA models the **timeline of risk**, predicting when an interaction will peak and when to intervene, not just whether it exists.
+Drug interactions do not all happen at once. They unfold over hours, days, and weeks. ARIA models the **timeline of risk** so a clinician knows when an interaction will actually peak and when to intervene, not just whether it exists.
 
 #### 2. Pharmacokinetic Mechanistic Reasoning
-ARIA explains *why* an interaction is dangerous at the **molecular level**: CYP enzyme competition, renal clearance conflicts, protein binding displacement, gut microbiome interference. Gemini 2.5 Pro powers the reasoning, not heuristic lookup.
+ARIA explains *why* an interaction is dangerous at the **molecular level**: CYP enzyme competition, renal clearance conflicts, protein binding displacement, gut microbiome interference. Gemini 2.5 Pro does the reasoning, not a heuristic lookup.
 
 #### 3. Patient Phenotype Risk Multiplier
-The same drug combination carries vastly different risk profiles across patients. ARIA calculates a **personalized risk score** adjusted for age, sex, CKD stage, hepatic function, smoking status, and more.
+The same drug pair carries very different risk profiles in different patients. ARIA produces a **personalized risk score** adjusted for age, sex, CKD stage, hepatic function, smoking status, and more.
 
 ```
-Warfarin + Aspirin on a healthy 35-year-old male    ->  4.2 / 10
-Warfarin + Aspirin on a 72-year-old female, CKD 3   ->  9.1 / 10
+Warfarin + Aspirin in a healthy 35-year-old male    ->  4.2 / 10
+Warfarin + Aspirin in a 72-year-old female, CKD 3   ->  9.1 / 10
 ```
 
 #### 4. N-Drug Interaction Graph with Hub Identification
-All existing tools check drugs pairwise. A patient on eight medications generates 28 pairwise checks, which is overwhelming noise. ARIA builds a full **interaction graph**, identifies **hub drugs** (the one medication causing 60% of conflicts), and detects **emergent three-drug interactions** that pairwise logic cannot see.
+Pairwise checkers do not scale. A patient on eight drugs generates 28 pairwise checks, which is overwhelming noise. ARIA builds a full **interaction graph**, identifies the **hub drug** that causes the majority of conflicts, and detects **three-drug emergent interactions** that pairwise logic cannot see.
 
 ```
 Example: Aspirin + Warfarin + Fish Oil
-Each is individually manageable.
-Combined, they create a triple anticoagulant effect.
+Each one alone is manageable.
+Together they create a triple anticoagulant effect.
 No pairwise checker catches this.
 ```
 
 #### 5. Evidence Grading with Confidence Scores
-Every warning is tagged with an **evidence grade** (A through D) and a **confidence score** (0 to 100%), with auto-linked PubMed citations. Clinicians can triage by evidence quality rather than treating every alert as equally urgent.
+Every alert is tagged with an **evidence grade** (A through D) and a **confidence score** (0 to 100%), with auto-linked PubMed citations. Clinicians can triage by evidence quality instead of treating every alert as equally urgent.
 
 #### 6. Cumulative Burden Scores
-ARIA calculates aggregate clinical loads across all medications simultaneously: **anticholinergic burden**, **sedation load**, and **QT prolongation risk**. These are validated clinical metrics that no existing tool computes as agent output.
+ARIA computes aggregate clinical loads across all medications at once: **anticholinergic burden**, **sedation load**, and **QT prolongation risk**. These are validated clinical metrics that no existing tool surfaces as agent output.
 
 #### 7. Deprescribing Optimizer
-ARIA produces a **prioritized, actionable deprescribing plan**: which drug to address first, what to substitute, what labs to monitor, and the expected risk reduction at each step. Not a warning. A plan.
+ARIA returns a **prioritized, actionable deprescribing plan**: which drug to address first, what to substitute, which labs to monitor, and the expected risk reduction at each step. Not a warning. A plan.
 
 #### 8. All of the Above, Integrated
-These are not isolated features. ARIA's A2A agent orchestrates all of them into a single coherent clinical reasoning pipeline. From a raw medication list to a structured clinical report in one invocation.
+None of these are isolated features. ARIA's A2A agent runs them as one coherent reasoning pipeline. From a raw medication list to a structured clinical report, in a single invocation.
 
 #### 9. Exportable Clinical Reports
-ARIA generates publication-ready clinical reports in multiple formats: **interactive 3D web view**, **downloadable HTML**, and **PDF export** (via browser print). Reports include risk interpretation with clinical context, per-interaction evidence citations with PubMed links, and a 3D patient body scan visualization. All timestamps use **WIB (Jakarta timezone)** for Southeast Asian clinical workflows.
+ARIA generates publication-ready reports in three formats: **interactive 3D web view**, **downloadable HTML**, and **PDF** (via browser print). Each report includes risk interpretation, per-interaction PubMed citations, and a 3D patient body scan visualization. All timestamps use **WIB (Jakarta time)** for Southeast Asian clinical workflows.
 
 #### 10. FHIR-Native Patient Context Ingestion
-ARIA reads active medications directly from any FHIR R4-compliant EHR via the `fhir_patient_medications` MCP tool. When invoked within the Prompt Opinion platform, patient IDs and bearer tokens propagate automatically through the SHARP Extension Specs. No manual entry, no custom EHR integration. For standalone use, the public HAPI FHIR sandbox serves as the test endpoint.
+ARIA reads active medications directly from any FHIR R4 EHR via the `fhir_patient_medications` MCP tool. When invoked inside Prompt Opinion, patient IDs and bearer tokens propagate automatically through the SHARP Extension Specs. No manual entry, no custom EHR integration. For standalone use, the public HAPI FHIR sandbox serves as the test endpoint.
 
 ```
 Prompt Opinion sends patient context
@@ -245,9 +191,25 @@ Prompt Opinion sends patient context
 Zero manual data entry. End-to-end in one agent call.
 ```
 
+### Novelty Comparison
+
+| Capability | Existing Tools | ARIA |
+|-----------|---------------|------|
+| Pairwise drug interaction lookup | Drugs.com, Epocrates, Medscape | Yes |
+| Three-way and N-drug emergent interactions | None | Yes |
+| Temporal cascade modeling | None | Yes |
+| Mechanistic reasoning via CYP, renal, microbiome pathways | None as agent | Yes |
+| Patient phenotype risk multiplier | None | Yes |
+| Evidence grading with confidence score per alert | None | Yes |
+| Cumulative burden scores as agent output | None | Yes |
+| Prioritized deprescribing optimizer | None | Yes |
+| 3D interactive clinical report with export (PDF/HTML) | None | Yes |
+| 3D patient body scan visualization | None | Yes |
+| Risk score interpretation with clinical context (0 to 10 scale) | None | Yes |
+
 ---
 
-## Architecture
+## System Architecture
 
 ### System Overview
 
@@ -290,24 +252,6 @@ flowchart LR
     H["📄 Report\nStructured clinical output"]
 ```
 
-### CI/CD Pipeline
-
-```mermaid
-flowchart TD
-    PUSH["git push to main"]
-
-    PUSH --> TEST["🧪 test.yml\nRust + Python + Next.js tests"]
-    TEST -->|pass| MCP_DEPLOY
-    TEST -->|pass| AGENT_DEPLOY
-    TEST -->|pass| FE_DEPLOY
-
-    MCP_DEPLOY["⚙️ deploy-mcp-server.yml\ncargo build\nDocker build\nArtifact Registry asia-southeast2\nCloud Run asia-southeast2"]
-
-    AGENT_DEPLOY["🤖 deploy-agent.yml\nDocker build\nArtifact Registry asia-southeast2\nCloud Run asia-southeast2"]
-
-    FE_DEPLOY["💻 deploy-frontend.yml\nVercel CLI build\nVercel production deploy"]
-```
-
 ### Service-to-Service Communication
 
 ```mermaid
@@ -329,6 +273,159 @@ sequenceDiagram
     AG-->>FE: Structured clinical report
     FE-->>U: 3D visualization + report
 ```
+
+### CI/CD Pipeline
+
+```mermaid
+flowchart TD
+    PUSH["git push to main"]
+
+    PUSH --> TEST["🧪 test.yml\nRust + Python + Next.js tests"]
+    TEST -->|pass| MCP_DEPLOY
+    TEST -->|pass| AGENT_DEPLOY
+    TEST -->|pass| FE_DEPLOY
+
+    MCP_DEPLOY["⚙️ deploy-mcp-server.yml\ncargo build\nDocker build\nArtifact Registry asia-southeast2\nCloud Run asia-southeast2"]
+
+    AGENT_DEPLOY["🤖 deploy-agent.yml\nDocker build\nArtifact Registry asia-southeast2\nCloud Run asia-southeast2"]
+
+    FE_DEPLOY["💻 deploy-frontend.yml\nVercel CLI build\nVercel production deploy"]
+```
+
+---
+
+## Live Deployment
+
+ARIA is fully deployed and accessible to judges and reviewers right now. Every endpoint below is public and does not require authentication for read access.
+
+### Production URLs
+
+| Component | Base URL | Health Check | Status |
+|---|---|---|---|
+| **Marketplace Listing (Prompt Opinion)** | [View ARIA on Prompt Opinion](https://app.promptopinion.ai/marketplace/agent/019e07f1-1952-7b07-8a90-4274fdbe8b49) | (n/a) | Published |
+| **Frontend (Vercel)** | [aria-polypharmacy.vercel.app](https://aria-polypharmacy.vercel.app) | (n/a) | Live |
+| **A2A Agent (Cloud Run)** | [aria-a2a-agent-233281205053.asia-southeast2.run.app](https://aria-a2a-agent-233281205053.asia-southeast2.run.app) | [`/health`](https://aria-a2a-agent-233281205053.asia-southeast2.run.app/health) | Live |
+| **MCP Server (Cloud Run)** | [aria-mcp-server-233281205053.asia-southeast2.run.app](https://aria-mcp-server-233281205053.asia-southeast2.run.app) | [`/health`](https://aria-mcp-server-233281205053.asia-southeast2.run.app/health) | Live |
+
+| Setting | Value |
+|---|---|
+| **GCP Project** | `aria-2026-ai` (project number `233281205053`) |
+| **Cloud Run Region** | `asia-southeast2` (Jakarta), A2A Agent and MCP Server |
+| **Vertex AI Region** | `us-central1`, Gemini 2.5 Pro calls only |
+
+> **Note.** The links in the **Health Check** column return the canonical JSON health payload expected by judges and uptime monitors. The base URLs are shown for reference (for example, as `PUBLIC_AGENT_URL` in client configuration); they are not intended to be opened in a browser.
+
+### Health Check Endpoints
+
+Judges can verify the deployment is live by hitting these public endpoints:
+
+```bash
+# Frontend
+curl -I https://aria-polypharmacy.vercel.app
+# Expected: HTTP/2 200
+
+# A2A Agent (Python LangGraph orchestrator)
+curl https://aria-a2a-agent-233281205053.asia-southeast2.run.app/health
+# Expected: {"status":"healthy","service":"aria-agent","mcp_server":"connected", ...}
+
+# MCP Server (Rust drug knowledge backend)
+curl https://aria-mcp-server-233281205053.asia-southeast2.run.app/health
+# Expected: {"service":"aria-mcp-server","status":"healthy","version":"0.1.0"}
+```
+
+### Try It Live in 60 Seconds
+
+1. Open https://aria-polypharmacy.vercel.app/analyze
+2. Click any **Quick Test** preset:
+   - **72F CKD3** returns risk score **9.6 CRITICAL**
+   - **81M Cardiac** returns **8.3 HIGH**
+   - **65F Anticholinergic Burden** returns **8.4 HIGH**
+3. Wait about 10 seconds while the LangGraph agent orchestrates Gemini 2.5 Pro reasoning over Vertex AI
+4. View the rendered 3D interaction graph, phenotype radar, deprescribing waterfall, and exportable PDF clinical report
+
+### Multi-Agent Access via A2A v1.0
+
+ARIA is also exposed as a first-class agent in the Agent2Agent (A2A) v1.0 ecosystem, so other AI agents can call it as a tool without going through the web UI. The A2A Agent publishes its capabilities at `/.well-known/agent-card.json` for automatic discovery, and serves a JSON-RPC 2.0 endpoint at `/a2a/v1` that conforms to the official A2A v1.0 specification.
+
+ARIA can be consumed two ways depending on the use case:
+
+| Path | Best for | URL |
+|---|---|---|
+| **Vercel frontend** | Clinicians, judges, end users who want the full visual experience (3D phenotype graph, risk timeline, deprescribing waterfall, PDF export) | https://aria-polypharmacy.vercel.app |
+| **A2A protocol** | Other agents and orchestration platforms that want to invoke ARIA as a polypharmacy reasoning tool | https://aria-a2a-agent-233281205053.asia-southeast2.run.app/a2a/v1 |
+
+Both paths hit the same backend pipeline (LangGraph orchestrator over MCP Server over Vertex AI), so the clinical reasoning is identical.
+
+#### Verified Interoperability with Prompt Opinion
+
+ARIA has been tested and confirmed working as a connected agent inside [Prompt Opinion](https://promptopinion.ai), a multi-agent collaboration platform. From a Prompt Opinion conversation, an orchestrator agent can delegate a polypharmacy question to ARIA, receive the full structured analysis, and surface it back to the user in the same chat. This confirms that ARIA is interoperable with the broader A2A v1.0 ecosystem and not just its own frontend.
+
+For maximum cross-client compatibility, the JSON-RPC endpoint accepts both the official spec method names (`message/send`, `tasks/send`) and the PascalCase variants emitted by some clients (`SendMessage`, `sendMessage`).
+
+#### Quick A2A Smoke Test
+
+```bash
+curl -s -X POST https://aria-a2a-agent-233281205053.asia-southeast2.run.app/a2a/v1 \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc":"2.0","id":"demo-1","method":"message/send",
+    "params":{"message":{"role":"user","messageId":"m1","kind":"message",
+    "parts":[{"kind":"text","text":"{\"medications\":[\"warfarin\",\"aspirin\"],\"patient\":{\"age\":78,\"sex\":\"male\",\"ckd_stage\":3}}"}]}}
+  }' | python3 -m json.tool | head -20
+```
+
+Expected response: a JSON-RPC envelope with `"status": {"state": "completed"}` and an `aria-analysis` artifact containing the full structured polypharmacy report.
+
+### Production Deployment Stack
+
+- **LLM**: Gemini 2.5 Pro via Vertex AI in `us-central1` (no API keys, uses GCP IAM)
+- **Authentication**: Default compute service account with `roles/aiplatform.user` and `roles/secretmanager.secretAccessor`
+- **Secrets**: OpenFDA API key stored in GCP Secret Manager, mounted into the Agent at runtime as `OPENFDA_API_KEY`
+- **Container Registry**: Artifact Registry at `asia-southeast2-docker.pkg.dev/aria-2026-ai/aria-images`
+- **Frontend**: Next.js 15 on Vercel with `NEXT_PUBLIC_AGENT_URL` pointing to the Cloud Run agent
+- **CI/CD**: GitHub Actions workflows in `.github/workflows/` auto-deploy on push to `main`
+
+> **Note on Vertex AI region.** Cloud Run services live in `asia-southeast2` (Jakarta) for low latency to Southeast Asian users, while Vertex AI calls go to `us-central1` because Gemini 2.5 Pro is not yet available in `asia-southeast2`. The added cross-region latency is roughly 200 ms per call, which is acceptable for the deliberative, non-interactive reasoning ARIA performs.
+
+---
+
+## Prompt Opinion Marketplace Integration
+
+ARIA is published to the [Prompt Opinion Marketplace](https://app.promptopinion.ai) as part of the [Agents Assemble Hackathon](https://agents-assemble.devpost.com). The integration follows **Path B (A2A Agent)** as defined in the competition rules.
+
+### Integration Flow
+
+```mermaid
+sequenceDiagram
+    participant PO as Prompt Opinion Platform
+    participant ARIA_AGENT as ARIA Agent
+    participant ARIA_MCP as ARIA MCP Server
+    participant FHIR as FHIR Server (HAPI / Partner EHR)
+
+    PO->>ARIA_AGENT: A2A invocation + SHARP headers (patient context, FHIR token)
+    ARIA_AGENT->>ARIA_MCP: fhir_patient_medications(patient_id, bearer_token)
+    ARIA_MCP->>FHIR: GET /MedicationRequest?patient={id}
+    FHIR-->>ARIA_MCP: Active medications bundle
+    ARIA_MCP->>ARIA_MCP: Run reasoning pipeline
+    ARIA_MCP-->>ARIA_AGENT: Full clinical report
+    ARIA_AGENT-->>PO: Structured output
+```
+
+### SHARP Extension Specs
+
+Patient context (patient ID) and FHIR bearer tokens propagate through multi-agent call chains via Prompt Opinion's SHARP Extension headers. ARIA's FHIR tool accepts both the platform-provided token and a local fallback for standalone testing. See [`docs/sharp-integration.md`](docs/sharp-integration.md) for header names, token propagation rules, and fallback behavior.
+
+### Marketplace Listing
+
+ARIA is published on the Prompt Opinion Marketplace as **ARIA Polypharmacy Specialist** by Wiqi Labs.
+
+**Direct link:** [https://app.promptopinion.ai/marketplace/agent/019e07f1-1952-7b07-8a90-4274fdbe8b49](https://app.promptopinion.ai/marketplace/agent/019e07f1-1952-7b07-8a90-4274fdbe8b49)
+
+From the listing page, judges and reviewers can:
+
+- View the full agent card, skills, extensions, and technical specs
+- Copy the A2A Agent Card URL for direct A2A invocation
+- Click **Add to Workspace** to install ARIA into a Prompt Opinion workspace and consult it from any conversation
 
 ---
 
@@ -563,38 +660,6 @@ Fonts:
 
 ---
 
-## Prompt Opinion Marketplace Integration
-
-ARIA is published to the [Prompt Opinion Marketplace](https://app.promptopinion.ai) as part of the [Agents Assemble Hackathon](https://agents-assemble.devpost.com). The integration follows **Path A (MCP Server)** as defined in the competition rules.
-
-### Integration Flow
-
-```mermaid
-sequenceDiagram
-    participant PO as Prompt Opinion Platform
-    participant ARIA_AGENT as ARIA Agent
-    participant ARIA_MCP as ARIA MCP Server
-    participant FHIR as FHIR Server (HAPI / Partner EHR)
-
-    PO->>ARIA_AGENT: A2A invocation + SHARP headers (patient context, FHIR token)
-    ARIA_AGENT->>ARIA_MCP: fhir_patient_medications(patient_id, bearer_token)
-    ARIA_MCP->>FHIR: GET /MedicationRequest?patient={id}
-    FHIR-->>ARIA_MCP: Active medications bundle
-    ARIA_MCP->>ARIA_MCP: Run reasoning pipeline
-    ARIA_MCP-->>ARIA_AGENT: Full clinical report
-    ARIA_AGENT-->>PO: Structured output
-```
-
-### SHARP Extension Specs
-
-Patient context (patient ID) and FHIR bearer tokens propagate through multi-agent call chains via Prompt Opinion's SHARP Extension headers. ARIA's FHIR tool accepts both the platform-provided token and a local fallback for standalone testing. See [`docs/sharp-integration.md`](docs/sharp-integration.md) for header names, token propagation rules, and fallback behavior.
-
-### Marketplace Listing
-
-Available on Prompt Opinion Marketplace: *Listing in progress, registration on https://app.promptopinion.ai*
-
----
-
 ## Google Cloud Setup (asia-southeast2)
 
 All backend services run on Google Cloud Run in the `asia-southeast2` region. This minimizes latency for Southeast Asian users and keeps data residency within the region.
@@ -727,7 +792,7 @@ gcloud run deploy aria-agent \
 
 ### 7. Service-to-Service Communication
 
-The A2A Agent calls the MCP Server over HTTPS within the same GCP project. Traffic stays within Google's internal network and does not incur egress charges.
+The A2A Agent calls the MCP Server over HTTPS within the same GCP project. Traffic stays inside Google's internal network and does not incur egress charges.
 
 ```
 [A2A Agent: Cloud Run asia-southeast2]
@@ -1021,48 +1086,9 @@ Full setup documentation: [`/docs/setup.md`](docs/setup.md)
 
 ---
 
-## Why This Matters
-
-| Metric | Value | Source |
-|--------|-------|--------|
-| Global cost of medication errors annually | $42 billion USD | [WHO, 2024](https://www.who.int/publications/i/item/9789240088887) |
-| Share of preventable medical harm that is medication-related | 50% | [WHO, 2022](https://www.who.int/news/item/16-09-2022-who-calls-for-urgent-action-by-countries-for-achieving-medication-without-harm) |
-| Patients experiencing medication harm globally | 1 in 20 hospital admissions | [WHO, 2024](https://www.who.int/publications/i/item/9789240088887) |
-| Global polypharmacy prevalence, general population | 37% | [Kim et al., Arch Gerontol Geriatr, 2024](https://pubmed.ncbi.nlm.nih.gov/38733922/) |
-| Global polypharmacy prevalence, adults 60+ | 39.1% | [Wang et al., Pharmacoepidemiol Drug Saf, 2024](https://pubmed.ncbi.nlm.nih.gov/39135518/) |
-| Polypharmacy among inpatients globally | 52% | [Kim et al., Arch Gerontol Geriatr, 2024](https://pubmed.ncbi.nlm.nih.gov/38733922/) |
-| Polypharmacy prevalence among older adults in China | 48% | [Nature Scientific Reports, 2023](https://www.nature.com/articles/s41598-023-45095-2) |
-| Polypharmacy prevalence among older adults in India | 49% | [Nature Scientific Reports, 2023](https://www.nature.com/articles/s41598-023-45095-2) |
-| Polypharmacy prevalence among older adults in Ethiopia | 37% | [Nature Scientific Reports, 2023](https://www.nature.com/articles/s41598-023-45095-2) |
-| Medication errors higher risk when on 5+ drugs | 30% higher incidence | [StatPearls, 2024](https://www.ncbi.nlm.nih.gov/books/NBK519065/) |
-| Drug interaction alerts overridden by clinicians | Over 90% | Clinical literature |
-| Impact of medication errors in LMICs vs. high-income countries | 2x higher healthy life years lost | [WHO, 2017](https://www.who.int/news/item/29-03-2017-who-launches-global-effort-to-halve-medication-related-errors-in-5-years) |
-
-Alert fatigue is not a behavior problem. It is a tool design problem. ARIA is the fix, built for every health system, everywhere.
-
----
-
-## Novelty Table
-
-| Capability | Existing Tools | ARIA |
-|-----------|---------------|------|
-| Pairwise drug interaction lookup | Drugs.com, Epocrates, Medscape | Yes |
-| Three-way and N-drug emergent interactions | None | Yes |
-| Temporal cascade modeling | None | Yes |
-| Mechanistic reasoning via CYP, renal, microbiome pathways | None as agent | Yes |
-| Patient phenotype risk multiplier | None | Yes |
-| Evidence grading with confidence score per alert | None | Yes |
-| Cumulative burden scores as agent output | None | Yes |
-| Prioritized deprescribing optimizer | None | Yes |
-| 3D interactive clinical report with export (PDF/HTML) | None | Yes |
-| 3D patient body scan visualization | None | Yes |
-| Risk score interpretation with clinical context (0-10 scale) | None | Yes |
-
----
-
 ## Data and Privacy
 
-ARIA uses exclusively public, de-identified data sources:
+ARIA uses public, de-identified data sources only:
 
 - [OpenFDA API](https://open.fda.gov/apis/) for FDA drug labels and adverse event reports
 - [RxNorm API](https://www.nlm.nih.gov/research/umls/rxnorm/) for drug name normalization
@@ -1085,7 +1111,7 @@ In production, the FHIR endpoint is replaced with the partner EHR's FHIR server,
 - [x] 3D interactive clinical report with force-directed graph, temporal timeline, phenotype radar, deprescribing waterfall
 - [x] PDF and HTML report export with clinical interpretation
 - [x] 3D patient body scan visualization with auto-rotate and scan animation
-- [x] Risk score interpretation with 0-10 scale (Low/Moderate/High/Critical) and clinical context descriptions
+- [x] Risk score interpretation with 0 to 10 scale (Low/Moderate/High/Critical) and clinical context descriptions
 - [x] Jakarta (WIB) timezone support for Southeast Asian clinical workflows
 - [x] About page with project overview, capabilities, and usage guide
 - [x] FHIR R4 medication resource ingestion via `fhir_patient_medications` MCP tool
