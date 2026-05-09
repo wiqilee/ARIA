@@ -59,11 +59,15 @@ impl LlmMode {
 
 /// Thinking-budget tier for a single Gemini call.
 ///
-/// Gemini 2.5 Pro defaults to "dynamic" thinking, which can burn 500–2000+
-/// tokens reasoning silently before producing output, adding 15–30s of
-/// latency per call. For most ARIA tools — which already pass an explicit
-/// JSON schema in their system prompt — thinking adds very little quality
-/// but a lot of wall-clock time.
+/// IMPORTANT: `gemini-2.5-pro` does NOT accept `thinkingBudget: 0` —
+/// when it receives 0 it silently produces empty responses, which makes
+/// the whole pipeline complete in seconds with no actual analysis.
+/// The minimum for Pro is 128. We use 256 here as a safe floor that
+/// still keeps wall-clock latency low (~2-3s per call vs the 20-40s of
+/// dynamic thinking).
+///
+/// If you ever swap the model to `gemini-2.5-flash` (which DOES accept 0),
+/// you can edit the `Off` arm below back to 0.
 ///
 /// Tier guidance:
 ///   - `Off`      → structural / computational tools
@@ -72,11 +76,6 @@ impl LlmMode {
 ///                  (temporal_cascade, suggest_alternatives)
 ///   - `Standard` → clinical reasoning tools where Pro thinking earns its keep
 ///                  (explain_mechanism, deprescribing_plan, generate_report)
-///
-/// If `Off` (budget = 0) ever returns a 400 from Vertex AI complaining about
-/// the minimum thinking budget for `gemini-2.5-pro`, change `Off` to 128
-/// — that is the documented floor for Pro and still cuts ~90% of the
-/// thinking latency vs. the dynamic default.
 #[derive(Debug, Clone, Copy)]
 pub enum ThinkingMode {
     Off,
@@ -87,8 +86,11 @@ pub enum ThinkingMode {
 impl ThinkingMode {
     fn budget(self) -> i32 {
         match self {
-            ThinkingMode::Off => 0,
-            ThinkingMode::Light => 256,
+            // 256: safe floor for gemini-2.5-pro. Was 0, but Pro rejects 0
+            // and returns empty content — that caused 9-second "completed"
+            // runs with no actual analysis.
+            ThinkingMode::Off => 256,
+            ThinkingMode::Light => 512,
             ThinkingMode::Standard => 1024,
         }
     }
@@ -294,16 +296,27 @@ impl GeminiClient {
             .and_then(|p| p.text)
             .unwrap_or_default();
 
+        // Surface empty-response failures explicitly instead of silently
+        // returning "" — that lets the caller log a clear error and the
+        // operator see what went wrong, instead of producing an empty
+        // struct that the agent's report formatter shows as "n/a".
+        if text.trim().is_empty() {
+            anyhow::bail!(
+                "Gemini returned empty content. Likely cause: thinkingBudget too low for the active model. \
+                 Check ThinkingMode in gemini.rs (current Off floor: 256)."
+            );
+        }
+
         Ok(text)
     }
 
     /// Send a JSON-mode prompt to Gemini.
     ///
-    /// Thinking budget defaults to **Off** (0 tokens) — every existing
-    /// call site (`check_interactions`, `score_risk`, etc.) automatically
-    /// benefits from removed thinking latency without any change to the
-    /// tool file. If a particular tool needs deeper clinical reasoning,
-    /// switch its call to `generate_with_mode(.., ThinkingMode::Standard)`.
+    /// Thinking budget defaults to **Off** (256 tokens, the safe floor for
+    /// `gemini-2.5-pro`). Every existing call site automatically benefits
+    /// from reduced latency without any change to the tool file. If a
+    /// particular tool needs deeper clinical reasoning, switch its call
+    /// to `generate_with_mode(.., ThinkingMode::Standard)`.
     pub async fn generate(&self, system_prompt: &str, user_prompt: &str) -> Result<String> {
         self.generate_with_mode(system_prompt, user_prompt, ThinkingMode::Off)
             .await
@@ -338,7 +351,7 @@ impl GeminiClient {
         self.send(&request).await
     }
 
-    /// Send a free-form text prompt (not JSON). Thinking budget defaults to **Off**.
+    /// Send a free-form text prompt (not JSON). Thinking budget defaults to **Off** (256).
     pub async fn generate_text(&self, system_prompt: &str, user_prompt: &str) -> Result<String> {
         self.generate_text_with_mode(system_prompt, user_prompt, ThinkingMode::Off)
             .await
