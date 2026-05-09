@@ -1,13 +1,22 @@
 """ARIA A2A Agent: FastAPI entrypoint with A2A v1.0 (JSON-RPC 2.0) protocol support.
 
-Implements SHARP Extension Specs header propagation for FHIR access context:
-X-FHIR-Server-URL, X-FHIR-Access-Token, and X-Patient-ID are read off every
-inbound A2A request and forwarded to the MCP layer as tool arguments. See
-docs/sharp-integration.md for the full propagation flow and fallback ladder.
+Implements FHIR access context propagation through TWO channels:
+
+1. A2A Extension payload (Prompt Opinion native, camelCase JSON):
+   https://app.promptopinion.ai/schemas/a2a/v1/fhir-context
+   Fields: fhirUrl, fhirToken, fhirRefreshToken, fhirRefreshTokenUrl, patientId
+
+2. SHARP HTTP headers (sharp-on-fhir-mcp compatible):
+   X-FHIR-Server-URL, X-FHIR-Access-Token, X-Patient-ID
+
+Both channels resolve to the same internal context, with Channel 1 taking
+precedence when both are present. See docs/sharp-integration.md for the
+full propagation flow and fallback ladder.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -44,17 +53,19 @@ HOST = os.getenv("HOST", "0.0.0.0")
 PORT = int(os.getenv("PORT", "8000"))
 
 # Public-facing URL for A2A agent card (used by external clients like Prompt Opinion).
-# Falls back to local dev URL if not set.
 PUBLIC_AGENT_URL = os.getenv("PUBLIC_AGENT_URL", f"http://{HOST}:{PORT}")
 
-# A2A protocol version this agent implements (v1 spec).
-# https://a2a-protocol.org/latest/announcing-1.0/
+# A2A protocol version this agent implements.
 A2A_PROTOCOL_VERSION = "1.0"
 
+# Hard ceiling for the pipeline. If the pipeline does not return within this
+# many seconds, we abort and return a "failed" task with a clear error message
+# so Po surfaces it instead of hanging on "Server Agent Responding...".
+# Tune this against your Cloud Run timeout (default 300s) and Po's client
+# timeout (typically 60-90s for blocking calls).
+PIPELINE_TIMEOUT_SECONDS = int(os.getenv("PIPELINE_TIMEOUT_SECONDS", "55"))
+
 # Method aliases accepted on the JSON-RPC endpoint.
-# The A2A v1.0 spec uses "message/send" and "tasks/send", but several real-world
-# clients (notably Prompt Opinion) emit PascalCase names like "SendMessage".
-# We accept all common variants so the agent works across the ecosystem.
 A2A_SEND_METHODS = frozenset({
     "message/send",
     "tasks/send",
@@ -62,8 +73,13 @@ A2A_SEND_METHODS = frozenset({
     "sendMessage",
 })
 
-# SHARP Extension Specs header names. The A2A endpoint reads these from every
-# inbound request and propagates them to the MCP layer. See docs/sharp-integration.md.
+# Prompt Opinion's official A2A FHIR Context extension URI.
+# Schema: https://app.promptopinion.ai/schemas/a2a/v1/fhir-context
+PO_FHIR_CONTEXT_EXTENSION_URI = (
+    "https://app.promptopinion.ai/schemas/a2a/v1/fhir-context"
+)
+
+# SHARP Extension Specs header names (sharp-on-fhir-mcp compatibility channel).
 SHARP_HEADER_FHIR_SERVER_URL = "X-FHIR-Server-URL"
 SHARP_HEADER_ACCESS_TOKEN = "X-FHIR-Access-Token"
 SHARP_HEADER_PATIENT_ID = "X-Patient-ID"
@@ -77,7 +93,6 @@ mcp_client = MCPClient(MCP_SERVER_URL)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Startup: check MCP server health. Shutdown: cleanup."""
     healthy = await mcp_client.health_check()
     if healthy:
         logger.info("MCP server at %s is healthy", MCP_SERVER_URL)
@@ -92,6 +107,7 @@ async def lifespan(app: FastAPI):
             MCP_SERVER_URL,
         )
     logger.info("Public agent URL: %s", PUBLIC_AGENT_URL)
+    logger.info("Pipeline timeout: %ds", PIPELINE_TIMEOUT_SECONDS)
     yield
     logger.info("ARIA Agent shutting down")
 
@@ -110,7 +126,6 @@ app.add_middleware(
     allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
-    # Expose SHARP request headers so browser-based A2A clients can send them.
     allow_headers=[
         "*",
         SHARP_HEADER_FHIR_SERVER_URL,
@@ -157,12 +172,7 @@ class AnalyzeResponse(BaseModel):
     errors: list[str] = Field(default_factory=list)
 
 
-# ── A2A v1.0 JSON-RPC Models ────────────────────────────────
-
-
 class JSONRPCRequest(BaseModel):
-    """JSON-RPC 2.0 envelope used by A2A v1.0."""
-
     jsonrpc: str = "2.0"
     id: str | int | None = None
     method: str
@@ -170,26 +180,61 @@ class JSONRPCRequest(BaseModel):
 
 
 class A2ATaskRequest(BaseModel):
-    """Legacy (pre-JSON-RPC) A2A task send request. Kept for backward compatibility."""
-
     id: str
     message: dict[str, Any]
 
 
-# ── SHARP Context Helpers ───────────────────────────────────
+# ── FHIR Context Extraction (Two Channels) ──────────────────
 
 
-def _extract_sharp_context(request: Request) -> dict[str, str]:
-    """Extract SHARP Extension Specs headers from an inbound A2A request.
+def _extract_fhir_context_from_extension(
+    message: dict[str, Any],
+) -> dict[str, str]:
+    """Extract FHIR context from the Prompt Opinion A2A Extension payload.
 
-    Returns a dict containing only the SHARP fields that were actually
-    present on the request, so callers can detect missing headers and
-    fall back to environment variables or message payload values.
+    Schema: https://app.promptopinion.ai/schemas/a2a/v1/fhir-context
 
-    The headers are case-insensitive per RFC 7230, which Starlette/FastAPI
-    already handles in request.headers.
+    Looks for the extension under message["extensions"] keyed by the
+    PO_FHIR_CONTEXT_EXTENSION_URI. Returns an internal context dict mapped
+    to the same keys used by the SHARP header path, so the rest of the
+    pipeline does not care which channel was used.
+    """
+    extensions = message.get("extensions") or {}
+    if not isinstance(extensions, dict):
+        return {}
 
-    Reference: docs/sharp-integration.md
+    payload = extensions.get(PO_FHIR_CONTEXT_EXTENSION_URI)
+    if not isinstance(payload, dict):
+        return {}
+
+    ctx: dict[str, str] = {}
+
+    if (url := payload.get("fhirUrl")) and isinstance(url, str) and url.strip():
+        ctx["fhir_server_url"] = url.strip()
+
+    if (token := payload.get("fhirToken")) and isinstance(token, str) and token.strip():
+        t = token.strip()
+        if t.lower().startswith("bearer "):
+            t = t[7:].strip()
+        ctx["fhir_bearer_token"] = t
+
+    if (rt := payload.get("fhirRefreshToken")) and isinstance(rt, str) and rt.strip():
+        ctx["fhir_refresh_token"] = rt.strip()
+
+    if (rtu := payload.get("fhirRefreshTokenUrl")) and isinstance(rtu, str) and rtu.strip():
+        ctx["fhir_refresh_token_url"] = rtu.strip()
+
+    if (pid := payload.get("patientId")) and isinstance(pid, str) and pid.strip():
+        ctx["patient_id"] = pid.strip()
+
+    return ctx
+
+
+def _extract_fhir_context_from_headers(request: Request) -> dict[str, str]:
+    """Extract FHIR context from SHARP HTTP headers.
+
+    sharp-on-fhir-mcp compatibility channel. Header names are case-insensitive
+    per RFC 7230, which Starlette/FastAPI already handles.
     """
     headers = request.headers
     ctx: dict[str, str] = {}
@@ -201,52 +246,76 @@ def _extract_sharp_context(request: Request) -> dict[str, str]:
     if fhir_server:
         ctx["fhir_server_url"] = fhir_server
     if access_token:
-        # Strip a single leading "Bearer " if present so we never end up with
-        # "Authorization: Bearer Bearer <token>" downstream.
         if access_token.lower().startswith("bearer "):
             access_token = access_token[7:].strip()
         ctx["fhir_bearer_token"] = access_token
     if patient_id:
         ctx["patient_id"] = patient_id
 
-    # Log presence only, never values, so bearer tokens never end up in logs.
-    if ctx:
-        logger.info(
-            "SHARP context received: fhir_server=%s patient_id=%s token_present=%s",
-            "yes" if "fhir_server_url" in ctx else "no",
-            "yes" if "patient_id" in ctx else "no",
-            "yes" if "fhir_bearer_token" in ctx else "no",
-        )
-
     return ctx
 
 
-def _merge_sharp_into_payload(
-    payload: dict[str, Any],
-    sharp_ctx: dict[str, str],
-) -> dict[str, Any]:
-    """Merge SHARP context into the parsed message payload.
+def _extract_fhir_context(
+    request: Request,
+    message: dict[str, Any] | None = None,
+) -> dict[str, str]:
+    """Extract FHIR context from both channels with deterministic precedence.
 
-    SHARP headers take precedence over message-payload values. The merged
-    shape is what the LangGraph pipeline and the FHIR MCP tool consume.
+    Precedence: A2A Extension payload (Channel 1) > SHARP headers (Channel 2).
+    Returns the merged context dict. Logs presence only, never values.
     """
-    if not sharp_ctx:
+    header_ctx = _extract_fhir_context_from_headers(request)
+    extension_ctx = (
+        _extract_fhir_context_from_extension(message) if message else {}
+    )
+
+    # Channel 1 (extension) wins, Channel 2 (headers) fills gaps.
+    merged = {**header_ctx, **extension_ctx}
+
+    if merged:
+        logger.info(
+            "FHIR context resolved: source=%s fhir_url=%s patient_id=%s token=%s refresh=%s",
+            "extension" if extension_ctx else "headers",
+            "yes" if "fhir_server_url" in merged else "no",
+            "yes" if "patient_id" in merged else "no",
+            "yes" if "fhir_bearer_token" in merged else "no",
+            "yes" if "fhir_refresh_token" in merged else "no",
+        )
+
+    return merged
+
+
+def _merge_fhir_into_payload(
+    payload: dict[str, Any],
+    fhir_ctx: dict[str, str],
+) -> dict[str, Any]:
+    """Merge FHIR context into the parsed message payload.
+
+    FHIR context (from either channel) takes precedence over message-payload
+    values for the same keys. The merged shape is what the LangGraph pipeline
+    and the FHIR MCP tool consume.
+    """
+    if not fhir_ctx:
         return payload
 
     fhir = dict(payload.get("fhir") or {})
-    if "patient_id" in sharp_ctx:
-        fhir["patient_id"] = sharp_ctx["patient_id"]
-    if "fhir_bearer_token" in sharp_ctx:
-        fhir["bearer_token"] = sharp_ctx["fhir_bearer_token"]
-    if "fhir_server_url" in sharp_ctx:
-        fhir["server_url"] = sharp_ctx["fhir_server_url"]
+    if "patient_id" in fhir_ctx:
+        fhir["patient_id"] = fhir_ctx["patient_id"]
+    if "fhir_bearer_token" in fhir_ctx:
+        fhir["bearer_token"] = fhir_ctx["fhir_bearer_token"]
+    if "fhir_server_url" in fhir_ctx:
+        fhir["server_url"] = fhir_ctx["fhir_server_url"]
+    if "fhir_refresh_token" in fhir_ctx:
+        fhir["refresh_token"] = fhir_ctx["fhir_refresh_token"]
+    if "fhir_refresh_token_url" in fhir_ctx:
+        fhir["refresh_token_url"] = fhir_ctx["fhir_refresh_token_url"]
     payload["fhir"] = fhir
 
     # Also lift patient_id into patient.id so existing pipeline code that reads
     # patient.id continues to work without modification.
-    if "patient_id" in sharp_ctx:
+    if "patient_id" in fhir_ctx:
         patient = dict(payload.get("patient") or {})
-        patient.setdefault("id", sharp_ctx["patient_id"])
+        patient.setdefault("id", fhir_ctx["patient_id"])
         payload["patient"] = patient
 
     return payload
@@ -256,7 +325,7 @@ def _merge_sharp_into_payload(
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
 
 
 def _jsonrpc_result(req_id: Any, result: dict[str, Any]) -> dict[str, Any]:
@@ -295,16 +364,10 @@ def _build_task(
 
 
 # ── Markdown Clinical Report Formatter ──────────────────────
-#
-# Po (Prompt Opinion's orchestrator) renders A2A artifact text as chat content.
-# When we return raw JSON, Po treats it as opaque structured data and summarizes
-# it down to "I have sent the analysis...". By converting the pipeline result
-# into Markdown here, Po pastes it directly as a rich chat message: headings,
-# tables, bullets, warnings all render natively in the Prompt Opinion UI.
+# (formatter functions unchanged from your version)
 
 
 def _risk_emoji(score: float | int | None) -> str:
-    """Map risk score (0 to 10) to an emoji indicator."""
     if score is None:
         return "⚪"
     try:
@@ -321,7 +384,6 @@ def _risk_emoji(score: float | int | None) -> str:
 
 
 def _fmt_patient(patient: Any) -> str:
-    """Format patient context as a one-line summary."""
     if not isinstance(patient, dict) or not patient:
         return "_No patient context provided._"
     bits: list[str] = []
@@ -344,7 +406,6 @@ def _fmt_patient(patient: Any) -> str:
 
 
 def _fmt_meds(medications: list[Any]) -> str:
-    """Format medication list as a comma-separated string."""
     names: list[str] = []
     for m in medications:
         if isinstance(m, str):
@@ -359,18 +420,13 @@ def _format_pipeline_result_markdown(
     patient: Any,
     result: dict[str, Any],
 ) -> str:
-    """Convert the ARIA pipeline result into a clinical Markdown report.
-
-    The output is designed to render well inside Prompt Opinion's chat UI
-    (Po pastes artifact text verbatim when it's plain text/markdown).
-    """
+    """Convert the ARIA pipeline result into a clinical Markdown report."""
     report = result.get("report") or {}
     graph = result.get("interaction_graph") or {}
     temporal = result.get("temporal_model") or {}
     plan = result.get("deprescribing_plan") or {}
     errors = result.get("errors") or []
 
-    # Risk summary
     overall_risk = (
         report.get("overall_risk_score")
         or report.get("risk_score")
@@ -379,15 +435,11 @@ def _format_pipeline_result_markdown(
     risk_label = report.get("risk_level") or report.get("severity") or "n/a"
 
     lines: list[str] = []
-
-    # Header
     lines.append("# 🧬 ARIA Polypharmacy Analysis")
     lines.append("")
     lines.append(f"**Patient:** {_fmt_patient(patient)}")
     lines.append(f"**Medications ({len(medications)}):** {_fmt_meds(medications)}")
     lines.append("")
-
-    # Overall risk
     lines.append("## 📊 Overall Risk")
     lines.append("")
     if overall_risk is not None:
@@ -399,7 +451,6 @@ def _format_pipeline_result_markdown(
         lines.append(f"**Risk level:** {risk_label}")
     lines.append("")
 
-    # Critical findings / interactions
     interactions = (
         graph.get("interactions")
         or graph.get("edges")
@@ -411,7 +462,7 @@ def _format_pipeline_result_markdown(
         lines.append("")
         lines.append("| Pair | Severity | Mechanism |")
         lines.append("|------|----------|-----------|")
-        for ix in interactions[:10]:  # cap at 10 for readability
+        for ix in interactions[:10]:
             if not isinstance(ix, dict):
                 continue
             pair = ix.get("pair") or ix.get("drugs") or [
@@ -438,7 +489,6 @@ def _format_pipeline_result_markdown(
             lines.append(f"_...and {len(interactions) - 10} additional interaction(s)._")
         lines.append("")
 
-    # Critical findings (text-form)
     findings = report.get("critical_findings") or report.get("findings") or []
     if findings:
         lines.append("## 🩺 Critical Findings")
@@ -453,7 +503,6 @@ def _format_pipeline_result_markdown(
                 lines.append(f"- {f}")
         lines.append("")
 
-    # Temporal projection
     timeline = temporal.get("timeline") or temporal.get("events") or []
     if timeline:
         lines.append("## ⏱️ Risk Timeline")
@@ -466,7 +515,6 @@ def _format_pipeline_result_markdown(
             lines.append(f"- **{t}**: {desc}")
         lines.append("")
 
-    # Deprescribing plan
     actions = (
         plan.get("actions")
         or plan.get("recommendations")
@@ -489,7 +537,6 @@ def _format_pipeline_result_markdown(
                 lines.append(f"{i}. {a}")
         lines.append("")
 
-    # Plan summary / monitoring
     monitoring = plan.get("monitoring") or report.get("monitoring") or []
     if monitoring:
         lines.append("## 🔬 Monitoring Recommendations")
@@ -498,7 +545,6 @@ def _format_pipeline_result_markdown(
             lines.append(f"- {m}")
         lines.append("")
 
-    # Errors (non-fatal pipeline warnings)
     if errors:
         lines.append("## ⚙️ Pipeline Notes")
         lines.append("")
@@ -524,19 +570,14 @@ def _format_pipeline_result_markdown(
     return rendered
 
 
-# ── A2A Agent Card Builder (v1 spec) ────────────────────────
+# ── A2A Agent Card Builder ──────────────────────────────────
 
 
 def _build_agent_card() -> dict[str, Any]:
-    """Construct the A2A v1 agent card.
+    """Construct the A2A v1.0 agent card.
 
-    Conforms to the v1 spec:
-      - top-level `url` removed (now lives in supportedInterfaces[].url)
-      - `preferredTransport` removed (order in supportedInterfaces = preference)
-      - `capabilities.stateTransitionHistory` removed
-      - `protocolVersion` = "1.0"
-      - `securitySchemes` follows OpenAPI 3.0 format directly
-    Reference: https://docs.promptopinion.ai/a2a-v1-migration
+    Declares support for both the Prompt Opinion FHIR Context A2A Extension
+    (camelCase JSON) and the SHARP HTTP headers (sharp-on-fhir-mcp).
     """
     return {
         "name": "ARIA",
@@ -554,9 +595,14 @@ def _build_agent_card() -> dict[str, Any]:
         "capabilities": {
             "streaming": False,
             "pushNotifications": False,
-            # SHARP Extension Specs support advertised so SHARP-aware clients
-            # know to forward FHIR context headers automatically.
             "experimental": {
+                # Channel 1: Prompt Opinion native A2A Extension.
+                "fhirContextExtension": {
+                    "supported": True,
+                    "uri": PO_FHIR_CONTEXT_EXTENSION_URI,
+                    "required": False,
+                },
+                # Channel 2: SHARP HTTP headers.
                 "sharpExtensions": {
                     "supported": True,
                     "headers": [
@@ -568,6 +614,14 @@ def _build_agent_card() -> dict[str, Any]:
                 },
             },
         },
+        # Declare the extension so Prompt Opinion knows to populate it.
+        "extensions": [
+            {
+                "uri": PO_FHIR_CONTEXT_EXTENSION_URI,
+                "description": "FHIR context allowing the agent to query a FHIR server securely",
+                "required": False,
+            }
+        ],
         "defaultInputModes": ["text/plain", "application/json"],
         "defaultOutputModes": ["text/plain", "application/json"],
         "supportedInterfaces": [
@@ -610,33 +664,42 @@ def _build_agent_card() -> dict[str, Any]:
 
 
 def _parse_message_content(parts: list[dict[str, Any]]) -> dict[str, Any]:
-    """Extract the full message payload from A2A message parts.
-
-    Returns the parsed payload as a dict so callers can merge SHARP context
-    into it before extracting medications and patient context.
-    """
     content = "".join(p.get("text", "") for p in parts if isinstance(p, dict) and "text" in p)
-
     try:
         data = json.loads(content) if content else {}
     except json.JSONDecodeError:
-        # Fall back: treat as comma-separated drug list
         data = {"medications": [m.strip() for m in content.split(",") if m.strip()]}
-
     return data if isinstance(data, dict) else {}
 
 
 def _payload_to_pipeline_args(payload: dict[str, Any]) -> tuple[list, Any, dict[str, Any]]:
-    """Split a (post-SHARP-merge) payload into pipeline arguments.
-
-    Returns (medications, patient_context, fhir_context). The fhir_context
-    is a dict that the pipeline forwards to the fhir_patient_medications
-    MCP tool (containing patient_id, bearer_token, server_url where set).
-    """
     medications = payload.get("medications") or []
     patient = payload.get("patient")
     fhir = payload.get("fhir") or {}
     return medications, patient, fhir
+
+
+async def _run_pipeline_with_timeout(
+    medications: list,
+    patient: Any,
+    fhir_ctx: dict[str, Any],
+) -> dict[str, Any]:
+    """Run the pipeline with a hard timeout to prevent hanging clients.
+
+    If the pipeline does not finish in PIPELINE_TIMEOUT_SECONDS, raise
+    asyncio.TimeoutError so the caller can return a clear "failed" task
+    instead of letting Po hang on "Server Agent Responding..." indefinitely.
+    """
+    async def _inner() -> dict[str, Any]:
+        try:
+            return await run_pipeline(
+                medications, patient, mcp_client, fhir_context=fhir_ctx or None
+            )
+        except TypeError:
+            # Backward compat for older run_pipeline signatures
+            return await run_pipeline(medications, patient, mcp_client)
+
+    return await asyncio.wait_for(_inner(), timeout=PIPELINE_TIMEOUT_SECONDS)
 
 
 # ── Routes ──────────────────────────────────────────────────
@@ -655,12 +718,6 @@ async def health():
 
 @app.post("/analyze", response_model=AnalyzeResponse)
 async def analyze(request: AnalyzeRequest, http_request: Request):
-    """Main analysis endpoint. Runs the full ARIA pipeline.
-
-    Also accepts SHARP Extension Specs headers, so a SMART-aware caller can
-    hit /analyze directly (without going through A2A) and still have the
-    FHIR tool see the patient context.
-    """
     meds: list[str | dict] = []
     for med in request.medications:
         if isinstance(med, str):
@@ -671,57 +728,43 @@ async def analyze(request: AnalyzeRequest, http_request: Request):
             meds.append(med)
 
     patient_ctx = request.patient.model_dump() if request.patient else None
-    sharp_ctx = _extract_sharp_context(http_request)
-    fhir_ctx = {
+    fhir_ctx = _extract_fhir_context(http_request)
+    pipeline_fhir_ctx = {
         k.replace("fhir_bearer_token", "bearer_token").replace("fhir_server_url", "server_url"): v
-        for k, v in sharp_ctx.items()
+        for k, v in fhir_ctx.items()
     }
 
     try:
-        result = await run_pipeline(meds, patient_ctx, mcp_client, fhir_context=fhir_ctx or None)
+        result = await _run_pipeline_with_timeout(meds, patient_ctx, pipeline_fhir_ctx)
         return AnalyzeResponse(**result)
-    except TypeError:
-        # Backward compatibility for older run_pipeline signatures that don't
-        # accept fhir_context yet. The pipeline can still read FHIR context
-        # from environment variables in that case.
-        result = await run_pipeline(meds, patient_ctx, mcp_client)
-        return AnalyzeResponse(**result)
+    except asyncio.TimeoutError:
+        logger.error("Pipeline timed out after %ds", PIPELINE_TIMEOUT_SECONDS)
+        raise HTTPException(
+            status_code=504,
+            detail=f"Analysis timed out after {PIPELINE_TIMEOUT_SECONDS}s",
+        )
     except Exception as e:
         logger.error("Pipeline failed: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail=f"Analysis failed: {e}")
 
 
-# ── A2A Protocol Endpoints ──────────────────────────────────
-
-
 @app.get("/.well-known/agent.json")
 async def agent_card_legacy():
-    """Legacy A2A path. Kept for backward compatibility."""
     return _build_agent_card()
 
 
 @app.get("/.well-known/agent-card.json")
 async def agent_card_standard():
-    """A2A protocol standard path (used by Prompt Opinion and modern A2A clients)."""
     return _build_agent_card()
 
 
 @app.post("/a2a/v1")
 async def a2a_jsonrpc(request: Request):
-    """A2A v1.0 JSON-RPC 2.0 endpoint (preferred).
+    """A2A v1.0 JSON-RPC 2.0 endpoint.
 
-    Handles JSON-RPC envelopes from Prompt Opinion and other A2A v1.0 clients.
-    Reads SHARP Extension Specs headers off the inbound request and propagates
-    them into the message payload before running the pipeline.
-
-    Supported method aliases (see A2A_SEND_METHODS):
-      - message/send   (A2A spec)
-      - tasks/send     (A2A spec, legacy alias)
-      - SendMessage    (Prompt Opinion convention)
-      - sendMessage    (camelCase variant)
+    Reads FHIR context from BOTH channels (extension + headers) and
+    propagates it into the message payload before running the pipeline.
     """
-    sharp_ctx = _extract_sharp_context(request)
-
     try:
         raw = await request.json()
     except Exception as e:
@@ -741,32 +784,35 @@ async def a2a_jsonrpc(request: Request):
         return _jsonrpc_error(raw.get("id"), -32600, f"Invalid Request: {e}")
 
     if rpc.method in A2A_SEND_METHODS:
-        return await _handle_message_send(rpc, sharp_ctx)
+        return await _handle_message_send(rpc, request)
 
     return _jsonrpc_error(rpc.id, -32601, f"Method not found: {rpc.method}")
 
 
 async def _handle_message_send(
     rpc: JSONRPCRequest,
-    sharp_ctx: dict[str, str],
+    request: Request,
 ) -> dict[str, Any]:
-    """Process an A2A v1.0 message/send (or alias) request and return a completed Task.
+    """Process an A2A v1.0 message/send request and return a completed Task.
 
-    The artifact text is a Markdown clinical report (not raw JSON) so that
-    chat-style A2A clients like Prompt Opinion render it directly as a rich
-    response instead of summarizing it down to a one-liner.
+    Critical fix: wraps run_pipeline in asyncio.wait_for so a hanging Gemini
+    or MCP call cannot leave Po waiting forever on "Server Agent Responding...".
+    On timeout, returns a Task with state=failed and a clear diagnostic message.
     """
     message = rpc.params.get("message", {}) or {}
     parts = message.get("parts", []) or []
 
+    # Extract FHIR context from BOTH channels (extension wins, headers fill gaps)
+    fhir_ctx = _extract_fhir_context(request, message)
+
     payload = _parse_message_content(parts)
-    payload = _merge_sharp_into_payload(payload, sharp_ctx)
-    medications, patient, fhir_ctx = _payload_to_pipeline_args(payload)
+    payload = _merge_fhir_into_payload(payload, fhir_ctx)
+    medications, patient, pipeline_fhir = _payload_to_pipeline_args(payload)
 
     task_id = str(uuid.uuid4())
     context_id = message.get("contextId") or str(uuid.uuid4())
 
-    if not medications and not fhir_ctx.get("patient_id"):
+    if not medications and not pipeline_fhir.get("patient_id"):
         return _jsonrpc_result(
             rpc.id,
             _build_task(
@@ -774,26 +820,35 @@ async def _handle_message_send(
                 context_id,
                 "failed",
                 "No medications and no FHIR patient context provided. "
-                "Send JSON with a 'medications' array, or supply SHARP "
-                "headers (X-Patient-ID, X-FHIR-Access-Token).",
+                "Send JSON with a 'medications' array, or supply the "
+                "FHIR Context A2A Extension, or SHARP headers "
+                "(X-Patient-ID, X-FHIR-Access-Token).",
             ),
         )
 
     try:
-        try:
-            result = await run_pipeline(
-                medications, patient, mcp_client, fhir_context=fhir_ctx or None
-            )
-        except TypeError:
-            result = await run_pipeline(medications, patient, mcp_client)
+        result = await _run_pipeline_with_timeout(medications, patient, pipeline_fhir)
         markdown = _format_pipeline_result_markdown(medications, patient, result)
+        return _jsonrpc_result(
+            rpc.id,
+            _build_task(task_id, context_id, "completed", markdown),
+        )
+    except asyncio.TimeoutError:
+        logger.error(
+            "A2A pipeline timed out after %ds (medications=%d)",
+            PIPELINE_TIMEOUT_SECONDS,
+            len(medications),
+        )
         return _jsonrpc_result(
             rpc.id,
             _build_task(
                 task_id,
                 context_id,
-                "completed",
-                markdown,
+                "failed",
+                f"⏱️ ARIA analysis timed out after {PIPELINE_TIMEOUT_SECONDS} seconds. "
+                f"This usually happens when the Gemini reasoning or upstream APIs are slow. "
+                f"Please try again with fewer medications, or hit the REST endpoint directly:\n\n"
+                f"`POST {PUBLIC_AGENT_URL}/analyze`",
             ),
         )
     except Exception as e:
@@ -804,25 +859,23 @@ async def _handle_message_send(
                 task_id,
                 context_id,
                 "failed",
-                f"Analysis failed: {e}",
+                f"❌ Analysis failed: {type(e).__name__}: {e}",
             ),
         )
 
 
 @app.post("/a2a/tasks/send")
 async def a2a_task_send_legacy(task: A2ATaskRequest, http_request: Request):
-    """Legacy A2A task send endpoint (pre-JSON-RPC). Kept for backward compatibility.
-
-    Also reads SHARP headers off the inbound request.
-    """
-    sharp_ctx = _extract_sharp_context(http_request)
-    message = task.message
+    """Legacy A2A task send endpoint. Kept for backward compatibility."""
+    message = task.message if isinstance(task.message, dict) else {}
     parts = message.get("parts", []) if isinstance(message, dict) else []
-    payload = _parse_message_content(parts)
-    payload = _merge_sharp_into_payload(payload, sharp_ctx)
-    medications, patient, fhir_ctx = _payload_to_pipeline_args(payload)
+    fhir_ctx = _extract_fhir_context(http_request, message)
 
-    if not medications and not fhir_ctx.get("patient_id"):
+    payload = _parse_message_content(parts)
+    payload = _merge_fhir_into_payload(payload, fhir_ctx)
+    medications, patient, pipeline_fhir = _payload_to_pipeline_args(payload)
+
+    if not medications and not pipeline_fhir.get("patient_id"):
         return {
             "id": task.id,
             "status": {"state": "failed"},
@@ -838,18 +891,25 @@ async def a2a_task_send_legacy(task: A2ATaskRequest, http_request: Request):
         }
 
     try:
-        try:
-            result = await run_pipeline(
-                medications, patient, mcp_client, fhir_context=fhir_ctx or None
-            )
-        except TypeError:
-            result = await run_pipeline(medications, patient, mcp_client)
+        result = await _run_pipeline_with_timeout(medications, patient, pipeline_fhir)
         markdown = _format_pipeline_result_markdown(medications, patient, result)
         return {
             "id": task.id,
             "status": {"state": "completed"},
+            "artifacts": [{"parts": [{"text": markdown}]}],
+        }
+    except asyncio.TimeoutError:
+        return {
+            "id": task.id,
+            "status": {"state": "failed"},
             "artifacts": [
-                {"parts": [{"text": markdown}]}
+                {
+                    "parts": [
+                        {
+                            "text": f"Analysis timed out after {PIPELINE_TIMEOUT_SECONDS}s"
+                        }
+                    ]
+                }
             ],
         }
     except Exception as e:
@@ -867,10 +927,4 @@ if __name__ == "__main__":
     logger.info("Starting ARIA Agent on %s:%d", HOST, PORT)
     logger.info("MCP Server URL: %s", MCP_SERVER_URL)
     logger.info("Public Agent URL: %s", PUBLIC_AGENT_URL)
-    uvicorn.run(
-        "main:app",
-        host=HOST,
-        port=PORT,
-        reload=False,
-        log_level="info",
-    )
+    uvicorn.run("main:app", host=HOST, port=PORT, reload=False, log_level="info")
