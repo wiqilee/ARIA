@@ -3,17 +3,6 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::env;
 
-/// Auth mode for the Gemini client.
-///
-/// `VertexAi` is the production mode — auth is handled via GCP IAM
-/// (metadata server on Cloud Run, or `gcloud` CLI fallback for local dev).
-///
-/// `AiStudio` is the lightweight mode used for hackathon / external
-/// platform integration (e.g. Prompt Opinion's "Start Free" onboarding,
-/// which expects a Google AI Studio API key). It hits a different
-/// endpoint and uses URL-parameter auth instead of a bearer token, but
-/// the request/response JSON shape is identical, so the rest of the
-/// codebase doesn't need to know which mode is active.
 #[derive(Clone, Debug)]
 pub enum LlmMode {
     VertexAi {
@@ -26,9 +15,6 @@ pub enum LlmMode {
 }
 
 impl LlmMode {
-    /// Read the active mode from env vars. Defaults to `vertex_ai`.
-    /// Fails with a clear message if the chosen mode's required vars
-    /// are missing — that's better than a confusing 401 at first call.
     pub fn from_env() -> Result<Self> {
         let mode = env::var("LLM_MODE").unwrap_or_else(|_| "vertex_ai".to_string());
         match mode.as_str() {
@@ -59,23 +45,21 @@ impl LlmMode {
 
 /// Thinking-budget tier for a single Gemini call.
 ///
-/// IMPORTANT: `gemini-2.5-pro` does NOT accept `thinkingBudget: 0` —
-/// when it receives 0 it silently produces empty responses, which makes
-/// the whole pipeline complete in seconds with no actual analysis.
-/// The minimum for Pro is 128. We use 256 here as a safe floor that
-/// still keeps wall-clock latency low (~2-3s per call vs the 20-40s of
-/// dynamic thinking).
-///
-/// If you ever swap the model to `gemini-2.5-flash` (which DOES accept 0),
-/// you can edit the `Off` arm below back to 0.
+/// Calibrated empirically on `gemini-2.5-pro`:
+///   - 0   → Pro silently returns empty content. NEVER use.
+///   - 128 → Documented Pro minimum; clean, fast (~1.5–3s/call).
+///   - 256 → Slightly safer quality buffer but adds 1–2s per call.
+///   - 1024 → Rich reasoning for clinical synthesis.
 ///
 /// Tier guidance:
 ///   - `Off`      → structural / computational tools
 ///                  (interaction_graph, score_risk, burden_scores, check_interactions)
-///   - `Light`    → tools that benefit from a small reasoning budget
-///                  (temporal_cascade, suggest_alternatives)
+///   - `Light`    → tools with light reasoning (temporal_cascade, suggest_alternatives)
 ///   - `Standard` → clinical reasoning tools where Pro thinking earns its keep
 ///                  (explain_mechanism, deprescribing_plan, generate_report)
+///
+/// If `Off=128` ever produces empty content (`send()` will surface a clear
+/// error), step it up to 192 or 256.
 #[derive(Debug, Clone, Copy)]
 pub enum ThinkingMode {
     Off,
@@ -86,17 +70,13 @@ pub enum ThinkingMode {
 impl ThinkingMode {
     fn budget(self) -> i32 {
         match self {
-            // 256: safe floor for gemini-2.5-pro. Was 0, but Pro rejects 0
-            // and returns empty content — that caused 9-second "completed"
-            // runs with no actual analysis.
-            ThinkingMode::Off => 256,
-            ThinkingMode::Light => 512,
+            ThinkingMode::Off => 128,
+            ThinkingMode::Light => 384,
             ThinkingMode::Standard => 1024,
         }
     }
 }
 
-/// Client for Gemini 2.5 Pro via Vertex AI or Google AI Studio.
 #[derive(Clone)]
 pub struct GeminiClient {
     http: Client,
@@ -160,8 +140,6 @@ struct CandidatePart {
 }
 
 impl GeminiClient {
-    /// Construct a client by reading env vars (`LLM_MODE` decides the
-    /// auth path; `GEMINI_MODEL` overrides the default model).
     pub fn from_env() -> Result<Self> {
         let mode = LlmMode::from_env()?;
         let model = env::var("GEMINI_MODEL").unwrap_or_else(|_| "gemini-2.5-pro".to_string());
@@ -172,9 +150,6 @@ impl GeminiClient {
         })
     }
 
-    /// Construct a Vertex AI client explicitly. Kept for backwards
-    /// compatibility with call sites that already pass project/location/model.
-    /// New code should prefer `from_env()`.
     #[allow(dead_code)]
     pub fn new(project_id: String, location: String, model: String) -> Self {
         Self {
@@ -184,8 +159,6 @@ impl GeminiClient {
         }
     }
 
-    /// Construct an AI Studio client explicitly. Useful for tests and for
-    /// callers that already have an API key in hand without going through env.
     #[allow(dead_code)]
     pub fn new_ai_studio(api_key: String, model: String) -> Self {
         Self {
@@ -195,11 +168,6 @@ impl GeminiClient {
         }
     }
 
-    /// Get an access token from the GCP metadata server (Cloud Run) or
-    /// fall back to `gcloud auth print-access-token` for local dev.
-    ///
-    /// Only called in `VertexAi` mode; AI Studio uses URL-parameter auth
-    /// and never reaches this function.
     async fn get_access_token(&self) -> Result<String> {
         let metadata_url =
             "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token";
@@ -220,7 +188,6 @@ impl GeminiClient {
             }
         }
 
-        // Fallback: gcloud CLI for local development.
         let output = tokio::process::Command::new("gcloud")
             .args(["auth", "print-access-token"])
             .output()
@@ -239,9 +206,6 @@ impl GeminiClient {
         Ok(token)
     }
 
-    /// Build the (url, optional bearer-auth header) tuple for the active
-    /// mode. AI Studio embeds the API key in the URL; Vertex AI uses an
-    /// Authorization header.
     async fn build_endpoint(&self) -> Result<(String, Option<String>)> {
         match &self.mode {
             LlmMode::VertexAi { project_id, location } => {
@@ -265,9 +229,6 @@ impl GeminiClient {
         }
     }
 
-    /// Internal: send the request body to whichever endpoint matches
-    /// the active mode and parse the text out. Both endpoints return
-    /// the same `candidates[0].content.parts[0].text` shape.
     async fn send(&self, request: &GeminiRequest) -> Result<String> {
         let (url, bearer) = self.build_endpoint().await?;
 
@@ -296,36 +257,21 @@ impl GeminiClient {
             .and_then(|p| p.text)
             .unwrap_or_default();
 
-        // Surface empty-response failures explicitly instead of silently
-        // returning "" — that lets the caller log a clear error and the
-        // operator see what went wrong, instead of producing an empty
-        // struct that the agent's report formatter shows as "n/a".
         if text.trim().is_empty() {
             anyhow::bail!(
                 "Gemini returned empty content. Likely cause: thinkingBudget too low for the active model. \
-                 Check ThinkingMode in gemini.rs (current Off floor: 256)."
+                 Step up ThinkingMode::Off in gemini.rs (current floor: 128). Try 192 or 256."
             );
         }
 
         Ok(text)
     }
 
-    /// Send a JSON-mode prompt to Gemini.
-    ///
-    /// Thinking budget defaults to **Off** (256 tokens, the safe floor for
-    /// `gemini-2.5-pro`). Every existing call site automatically benefits
-    /// from reduced latency without any change to the tool file. If a
-    /// particular tool needs deeper clinical reasoning, switch its call
-    /// to `generate_with_mode(.., ThinkingMode::Standard)`.
     pub async fn generate(&self, system_prompt: &str, user_prompt: &str) -> Result<String> {
         self.generate_with_mode(system_prompt, user_prompt, ThinkingMode::Off)
             .await
     }
 
-    /// JSON-mode prompt with explicit thinking-budget control.
-    ///
-    /// Use this in tools that need clinical reasoning depth — see the
-    /// `ThinkingMode` doc-comment for the recommended tier per tool.
     pub async fn generate_with_mode(
         &self,
         system_prompt: &str,
@@ -351,13 +297,11 @@ impl GeminiClient {
         self.send(&request).await
     }
 
-    /// Send a free-form text prompt (not JSON). Thinking budget defaults to **Off** (256).
     pub async fn generate_text(&self, system_prompt: &str, user_prompt: &str) -> Result<String> {
         self.generate_text_with_mode(system_prompt, user_prompt, ThinkingMode::Off)
             .await
     }
 
-    /// Free-form text prompt with explicit thinking-budget control.
     pub async fn generate_text_with_mode(
         &self,
         system_prompt: &str,

@@ -61,9 +61,14 @@ A2A_PROTOCOL_VERSION = "1.0"
 # Hard ceiling for the pipeline. If the pipeline does not return within this
 # many seconds, we abort and return a "failed" task with a clear error message
 # so Po surfaces it instead of hanging on "Server Agent Responding...".
-# Tune this against your Cloud Run timeout (default 300s) and Po's client
-# timeout (typically 60-90s for blocking calls).
-PIPELINE_TIMEOUT_SECONDS = int(os.getenv("PIPELINE_TIMEOUT_SECONDS", "55"))
+#
+# Default raised from 55s -> 180s so that if the GitHub Actions deploy
+# workflow re-deploys without re-applying our env var, we no longer fall
+# back into a too-tight 55s ceiling that fails healthy ~60s pipelines.
+# The Cloud Run request timeout is set to 300s, and Po itself appears to
+# time out around 60s — so 180s gives a wide internal buffer while still
+# bounding hung Gemini calls.
+PIPELINE_TIMEOUT_SECONDS = int(os.getenv("PIPELINE_TIMEOUT_SECONDS", "180"))
 
 # Method aliases accepted on the JSON-RPC endpoint.
 A2A_SEND_METHODS = frozenset({
@@ -364,7 +369,6 @@ def _build_task(
 
 
 # ── Markdown Clinical Report Formatter ──────────────────────
-# (formatter functions unchanged from your version)
 
 
 def _risk_emoji(score: float | int | None) -> str:
@@ -420,39 +424,95 @@ def _format_pipeline_result_markdown(
     patient: Any,
     result: dict[str, Any],
 ) -> str:
-    """Convert the ARIA pipeline result into a clinical Markdown report."""
+    """Convert the ARIA pipeline result into a clinical Markdown report.
+
+    Reads the actual schema produced by the Rust MCP tools:
+      - report.overall_risk_level             (string: low/moderate/high/critical)
+      - report.risk_scores[*].adjusted_score  (float, per-interaction)
+      - report.critical_findings              (list[str])
+      - raw_interactions.interactions[*]      (list[dict] with mechanism)
+      - temporal_model.daily_risk             (list[dict])
+      - temporal_model.intervention_windows   (list[dict])
+      - temporal_model.peak_risk_day          (int)
+      - deprescribing_plan.steps              (list[dict])
+      - deprescribing_plan.steps[*].monitoring (list[str])
+      - deprescribing_plan.warnings           (list[str])
+
+    Legacy field names from earlier pipeline shapes are kept as fallbacks
+    so this formatter remains compatible with older snapshots.
+    """
     report = result.get("report") or {}
     graph = result.get("interaction_graph") or {}
     temporal = result.get("temporal_model") or {}
     plan = result.get("deprescribing_plan") or {}
+    raw_ix = result.get("raw_interactions") or {}
     errors = result.get("errors") or []
 
-    overall_risk = (
-        report.get("overall_risk_score")
-        or report.get("risk_score")
-        or graph.get("aggregate_risk")
-    )
-    risk_label = report.get("risk_level") or report.get("severity") or "n/a"
+    # --- Overall risk: derive numeric score from the highest adjusted_score ---
+    risk_scores_list = report.get("risk_scores") or []
+    overall_risk = None
+    if risk_scores_list:
+        scores = [
+            r.get("adjusted_score")
+            for r in risk_scores_list
+            if isinstance(r, dict) and r.get("adjusted_score") is not None
+        ]
+        if scores:
+            overall_risk = max(scores)
+    # Fall back to legacy field names if older pipeline output ever appears.
+    if overall_risk is None:
+        overall_risk = (
+            report.get("overall_risk_score")
+            or report.get("risk_score")
+            or graph.get("aggregate_risk")
+        )
 
+    risk_label = (
+        report.get("overall_risk_level")
+        or report.get("risk_level")
+        or report.get("severity")
+        or "n/a"
+    )
+
+    # --- Header ---
     lines: list[str] = []
     lines.append("# 🧬 ARIA Polypharmacy Analysis")
     lines.append("")
     lines.append(f"**Patient:** {_fmt_patient(patient)}")
     lines.append(f"**Medications ({len(medications)}):** {_fmt_meds(medications)}")
     lines.append("")
+
+    # --- Overall risk ---
     lines.append("## 📊 Overall Risk")
     lines.append("")
     if overall_risk is not None:
         lines.append(
             f"{_risk_emoji(overall_risk)} **Risk score:** {overall_risk} / 10"
-            f"{'  •  **Level:** ' + str(risk_label) if risk_label != 'n/a' else ''}"
+            f"{'  •  **Level:** ' + str(risk_label).upper() if risk_label != 'n/a' else ''}"
         )
     else:
-        lines.append(f"**Risk level:** {risk_label}")
+        lines.append(f"**Risk level:** {str(risk_label).upper()}")
     lines.append("")
 
+    # --- Critical findings ---
+    findings = report.get("critical_findings") or report.get("findings") or []
+    if findings:
+        lines.append("## 🩺 Critical Findings")
+        lines.append("")
+        for f in findings[:8]:
+            if isinstance(f, dict):
+                msg = f.get("message") or f.get("text") or json.dumps(f, default=str)
+                sev = f.get("severity")
+                prefix = f"**[{sev}]** " if sev else ""
+                lines.append(f"- {prefix}{msg}")
+            else:
+                lines.append(f"- {f}")
+        lines.append("")
+
+    # --- Drug interactions: prefer raw_interactions (rich mechanism) over graph.edges ---
     interactions = (
-        graph.get("interactions")
+        raw_ix.get("interactions")
+        or graph.get("interactions")
         or graph.get("edges")
         or report.get("interactions")
         or []
@@ -477,48 +537,69 @@ def _format_pipeline_result_markdown(
             mech = (
                 ix.get("mechanism")
                 or ix.get("description")
+                or ix.get("clinical_significance")
+                or ix.get("interaction_type")
                 or ix.get("note")
                 or "n/a"
             )
-            mech_str = str(mech).replace("\n", " ").strip()
-            if len(mech_str) > 140:
-                mech_str = mech_str[:137] + "..."
+            mech_str = str(mech).replace("\n", " ").replace("|", "/").strip()
+            if len(mech_str) > 160:
+                mech_str = mech_str[:157] + "..."
             lines.append(f"| {pair_str} | {sev} | {mech_str} |")
         if len(interactions) > 10:
             lines.append("")
             lines.append(f"_...and {len(interactions) - 10} additional interaction(s)._")
         lines.append("")
 
-    findings = report.get("critical_findings") or report.get("findings") or []
-    if findings:
-        lines.append("## 🩺 Critical Findings")
-        lines.append("")
-        for f in findings[:8]:
-            if isinstance(f, dict):
-                msg = f.get("message") or f.get("text") or json.dumps(f, default=str)
-                sev = f.get("severity")
-                prefix = f"**[{sev}]** " if sev else ""
-                lines.append(f"- {prefix}{msg}")
-            else:
-                lines.append(f"- {f}")
-        lines.append("")
+    # --- Risk timeline: pipeline returns daily_risk + intervention_windows ---
+    daily_risk = temporal.get("daily_risk") or []
+    windows = temporal.get("intervention_windows") or []
+    peak_day = temporal.get("peak_risk_day")
+    peak_score = temporal.get("peak_risk_score")
+    timeline_summary = temporal.get("summary")
+    legacy_timeline = temporal.get("timeline") or temporal.get("events") or []
 
-    timeline = temporal.get("timeline") or temporal.get("events") or []
-    if timeline:
+    if daily_risk or windows or peak_day is not None or timeline_summary or legacy_timeline:
         lines.append("## ⏱️ Risk Timeline")
         lines.append("")
-        for ev in timeline[:6]:
-            if not isinstance(ev, dict):
-                continue
-            t = ev.get("time") or ev.get("when") or ev.get("horizon") or "n/a"
-            desc = ev.get("event") or ev.get("description") or ev.get("risk") or "n/a"
-            lines.append(f"- **{t}**: {desc}")
-        lines.append("")
+        if peak_day is not None:
+            peak_line = f"**Peak risk:** Day {peak_day}"
+            if peak_score is not None:
+                peak_line += f" (score {peak_score})"
+            lines.append(peak_line)
+            lines.append("")
+        if windows:
+            lines.append("**Intervention windows:**")
+            for w in windows[:6]:
+                if not isinstance(w, dict):
+                    continue
+                day_start = w.get("day_start")
+                day_end = w.get("day_end")
+                action = w.get("action") or "n/a"
+                urgency = w.get("urgency") or ""
+                urgency_str = f" _({urgency})_" if urgency else ""
+                if day_start is not None and day_end is not None:
+                    lines.append(f"- **Day {day_start}–{day_end}**{urgency_str}: {action}")
+                else:
+                    lines.append(f"- {action}{urgency_str}")
+            lines.append("")
+        elif legacy_timeline:
+            for ev in legacy_timeline[:6]:
+                if not isinstance(ev, dict):
+                    continue
+                t = ev.get("time") or ev.get("when") or ev.get("horizon") or "n/a"
+                desc = ev.get("event") or ev.get("description") or ev.get("risk") or "n/a"
+                lines.append(f"- **{t}**: {desc}")
+            lines.append("")
+        if timeline_summary:
+            lines.append(f"_{timeline_summary}_")
+            lines.append("")
 
+    # --- Deprescribing plan ---
     actions = (
-        plan.get("actions")
+        plan.get("steps")
+        or plan.get("actions")
         or plan.get("recommendations")
-        or plan.get("steps")
         or []
     )
     if actions:
@@ -529,15 +610,43 @@ def _format_pipeline_result_markdown(
                 drug = a.get("drug") or a.get("medication") or "n/a"
                 action = a.get("action") or a.get("recommendation") or "n/a"
                 rationale = a.get("rationale") or a.get("reason") or ""
-                line = f"{i}. **{drug}**: {action}"
-                if rationale:
-                    line += f"  \n   _Rationale:_ {rationale}"
+                substitute = a.get("substitute")
+                timeline_when = a.get("timeline")
+                line = f"{i}. **{drug}** — {action}"
+                if substitute:
+                    line += f" → _{substitute}_"
+                if timeline_when:
+                    line += f"  •  _{timeline_when}_"
                 lines.append(line)
+                if rationale:
+                    lines.append(f"   _Rationale:_ {rationale}")
             else:
                 lines.append(f"{i}. {a}")
+        # Plan summary + total expected risk reduction
+        total_red = plan.get("total_expected_risk_reduction")
+        plan_summary = plan.get("summary")
+        if total_red is not None:
+            lines.append("")
+            try:
+                lines.append(
+                    f"**Expected total risk reduction:** {round(float(total_red) * 100)}%"
+                )
+            except (TypeError, ValueError):
+                pass
+        if plan_summary:
+            lines.append("")
+            lines.append(f"_{plan_summary}_")
         lines.append("")
 
-    monitoring = plan.get("monitoring") or report.get("monitoring") or []
+    # --- Monitoring: flatten from each plan step, then fall back to top-level lists ---
+    monitoring: list[str] = []
+    for step in actions:
+        if isinstance(step, dict):
+            for m in step.get("monitoring") or []:
+                if isinstance(m, str) and m not in monitoring:
+                    monitoring.append(m)
+    if not monitoring:
+        monitoring = plan.get("monitoring") or report.get("monitoring") or []
     if monitoring:
         lines.append("## 🔬 Monitoring Recommendations")
         lines.append("")
@@ -545,6 +654,16 @@ def _format_pipeline_result_markdown(
             lines.append(f"- {m}")
         lines.append("")
 
+    # --- Warnings ---
+    warnings = plan.get("warnings") or []
+    if warnings:
+        lines.append("## ⚠️ Warnings")
+        lines.append("")
+        for w in warnings[:6]:
+            lines.append(f"- {w}")
+        lines.append("")
+
+    # --- Pipeline notes (only if errors were collected) ---
     if errors:
         lines.append("## ⚙️ Pipeline Notes")
         lines.append("")
@@ -553,7 +672,12 @@ def _format_pipeline_result_markdown(
         lines.append("")
 
     rendered = "\n".join(lines).strip()
-    if rendered.count("##") == 0:
+
+    # If somehow we still produced nothing useful, fall back to a debug dump
+    # so judges / clinicians at least see the raw pipeline payload instead of
+    # an empty card. The "## " threshold of <=1 means: only the header was
+    # emitted, no real findings sections.
+    if rendered.count("##") <= 1:
         rendered += (
             "\n\n_No structured findings returned by the pipeline. "
             "Raw payload below for debugging:_\n\n"
