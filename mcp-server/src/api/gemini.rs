@@ -57,6 +57,43 @@ impl LlmMode {
     }
 }
 
+/// Thinking-budget tier for a single Gemini call.
+///
+/// Gemini 2.5 Pro defaults to "dynamic" thinking, which can burn 500–2000+
+/// tokens reasoning silently before producing output, adding 15–30s of
+/// latency per call. For most ARIA tools — which already pass an explicit
+/// JSON schema in their system prompt — thinking adds very little quality
+/// but a lot of wall-clock time.
+///
+/// Tier guidance:
+///   - `Off`      → structural / computational tools
+///                  (interaction_graph, score_risk, burden_scores, check_interactions)
+///   - `Light`    → tools that benefit from a small reasoning budget
+///                  (temporal_cascade, suggest_alternatives)
+///   - `Standard` → clinical reasoning tools where Pro thinking earns its keep
+///                  (explain_mechanism, deprescribing_plan, generate_report)
+///
+/// If `Off` (budget = 0) ever returns a 400 from Vertex AI complaining about
+/// the minimum thinking budget for `gemini-2.5-pro`, change `Off` to 128
+/// — that is the documented floor for Pro and still cuts ~90% of the
+/// thinking latency vs. the dynamic default.
+#[derive(Debug, Clone, Copy)]
+pub enum ThinkingMode {
+    Off,
+    Light,
+    Standard,
+}
+
+impl ThinkingMode {
+    fn budget(self) -> i32 {
+        match self {
+            ThinkingMode::Off => 0,
+            ThinkingMode::Light => 256,
+            ThinkingMode::Standard => 1024,
+        }
+    }
+}
+
 /// Client for Gemini 2.5 Pro via Vertex AI or Google AI Studio.
 #[derive(Clone)]
 pub struct GeminiClient {
@@ -90,6 +127,14 @@ struct GenerationConfig {
     max_output_tokens: u32,
     #[serde(rename = "responseMimeType")]
     response_mime_type: String,
+    #[serde(rename = "thinkingConfig")]
+    thinking_config: ThinkingConfig,
+}
+
+#[derive(Debug, Serialize)]
+struct ThinkingConfig {
+    #[serde(rename = "thinkingBudget")]
+    thinking_budget: i32,
 }
 
 #[derive(Debug, Deserialize)]
@@ -252,8 +297,28 @@ impl GeminiClient {
         Ok(text)
     }
 
-    /// Send a prompt to Gemini and get a JSON-formatted response.
+    /// Send a JSON-mode prompt to Gemini.
+    ///
+    /// Thinking budget defaults to **Off** (0 tokens) — every existing
+    /// call site (`check_interactions`, `score_risk`, etc.) automatically
+    /// benefits from removed thinking latency without any change to the
+    /// tool file. If a particular tool needs deeper clinical reasoning,
+    /// switch its call to `generate_with_mode(.., ThinkingMode::Standard)`.
     pub async fn generate(&self, system_prompt: &str, user_prompt: &str) -> Result<String> {
+        self.generate_with_mode(system_prompt, user_prompt, ThinkingMode::Off)
+            .await
+    }
+
+    /// JSON-mode prompt with explicit thinking-budget control.
+    ///
+    /// Use this in tools that need clinical reasoning depth — see the
+    /// `ThinkingMode` doc-comment for the recommended tier per tool.
+    pub async fn generate_with_mode(
+        &self,
+        system_prompt: &str,
+        user_prompt: &str,
+        mode: ThinkingMode,
+    ) -> Result<String> {
         let request = GeminiRequest {
             contents: vec![Content {
                 role: "user".to_string(),
@@ -265,13 +330,27 @@ impl GeminiClient {
                 temperature: 0.2,
                 max_output_tokens: 8192,
                 response_mime_type: "application/json".to_string(),
+                thinking_config: ThinkingConfig {
+                    thinking_budget: mode.budget(),
+                },
             },
         };
         self.send(&request).await
     }
 
-    /// Send a prompt expecting free-form text (not JSON).
+    /// Send a free-form text prompt (not JSON). Thinking budget defaults to **Off**.
     pub async fn generate_text(&self, system_prompt: &str, user_prompt: &str) -> Result<String> {
+        self.generate_text_with_mode(system_prompt, user_prompt, ThinkingMode::Off)
+            .await
+    }
+
+    /// Free-form text prompt with explicit thinking-budget control.
+    pub async fn generate_text_with_mode(
+        &self,
+        system_prompt: &str,
+        user_prompt: &str,
+        mode: ThinkingMode,
+    ) -> Result<String> {
         let request = GeminiRequest {
             contents: vec![Content {
                 role: "user".to_string(),
@@ -283,6 +362,9 @@ impl GeminiClient {
                 temperature: 0.3,
                 max_output_tokens: 8192,
                 response_mime_type: "text/plain".to_string(),
+                thinking_config: ThinkingConfig {
+                    thinking_budget: mode.budget(),
+                },
             },
         };
         self.send(&request).await
