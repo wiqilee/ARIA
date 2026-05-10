@@ -15,7 +15,7 @@ full propagation flow and fallback ladder.
 
 A2A v1.0 lifecycle (blocking-first):
 
-    POST /a2a/v1 message/send
+    POST /a2a/v1 (and /) message/send
       → server runs the pipeline and waits up to PO_BLOCKING_BUDGET_SECONDS
         for it to finish.
         - Finished: returns Task state="completed" with markdown artifact.
@@ -23,12 +23,14 @@ A2A v1.0 lifecycle (blocking-first):
           can poll tasks/get to retrieve the eventual completed/failed
           state. Background coroutine is shielded from cancellation.
 
-    POST /a2a/v1 tasks/get
+    POST /a2a/v1 (and /) tasks/get
       → returns the latest stored Task snapshot for the given task_id.
 
-This blocking-first design keeps simple A2A clients (like Po, which seem
-to expect a fully-resolved task in the same response) happy in the common
-case where pipelines finish in <60s.
+The same handler is mounted at BOTH / and /a2a/v1. Some A2A v1.0 clients
+(notably Prompt Opinion) issue JSON-RPC calls to the URL declared in the
+agent card's top-level `url` field, falling back to the base URL when
+that field is absent. Mounting both paths keeps both clients happy
+without forcing a path choice on the agent card.
 """
 
 from __future__ import annotations
@@ -88,7 +90,7 @@ PIPELINE_TIMEOUT_SECONDS = int(os.getenv("PIPELINE_TIMEOUT_SECONDS", "180"))
 # can retrieve it via tasks/get.
 PO_BLOCKING_BUDGET_SECONDS = int(os.getenv("PO_BLOCKING_BUDGET_SECONDS", "170"))
 
-# Toggle to dump every /a2a/v1 request and response body to logs. Useful
+# Toggle to dump every JSON-RPC request and response body to logs. Useful
 # while debugging client-specific quirks. Set DEBUG_A2A=0 to disable.
 DEBUG_A2A = os.getenv("DEBUG_A2A", "1") == "1"
 
@@ -104,6 +106,14 @@ A2A_GET_METHODS = frozenset({
     "GetTask",
     "getTask",
 })
+
+# Paths on which we serve the JSON-RPC endpoint. We mount both because
+# different clients infer the endpoint from different fields:
+#   - /a2a/v1: declared in supportedInterfaces[0].url, used by clients
+#     that walk supportedInterfaces.
+#   - /:       used by clients (like Po) that POST JSON-RPC to the
+#     top-level `url` field on the agent card or to the base URL.
+A2A_RPC_PATHS = frozenset({"/", "/a2a/v1"})
 
 PO_FHIR_CONTEXT_EXTENSION_URI = (
     "https://app.promptopinion.ai/schemas/a2a/v1/fhir-context"
@@ -181,26 +191,35 @@ app = FastAPI(
 )
 
 
-# ── Debug Middleware (capture A2A I/O) ──────────────────────
+# ── Debug Middleware (capture A2A I/O on JSON-RPC paths) ────
 
 
 @app.middleware("http")
 async def _debug_a2a_io(request: Request, call_next):
-    """Log full A2A request/response bodies for client interop debugging.
+    """Log full request/response bodies for any POST hitting an A2A path.
 
-    Only active when DEBUG_A2A=1. Read the request body, log it, then
-    reconstruct the request so downstream handlers still see the body.
-    Capture the response by draining body_iterator and rebuilding.
+    Active when DEBUG_A2A=1. Also logs to RAW format if JSON parse fails.
+    Triggers on both / and /a2a/v1 since both are valid JSON-RPC entry
+    points.
     """
-    if not DEBUG_A2A or request.url.path != "/a2a/v1" or request.method != "POST":
+    is_a2a = (
+        DEBUG_A2A
+        and request.method == "POST"
+        and request.url.path in A2A_RPC_PATHS
+    )
+    if not is_a2a:
         return await call_next(request)
 
     body = await request.body()
     try:
         parsed = _json_dbg.loads(body)
-        logger.info("A2A_DEBUG_REQ: %s", _json_dbg.dumps(parsed, default=str)[:3000])
+        logger.info(
+            "A2A_DEBUG_REQ path=%s body=%s",
+            request.url.path,
+            _json_dbg.dumps(parsed, default=str)[:3000],
+        )
     except Exception:
-        logger.info("A2A_DEBUG_REQ_RAW: %s", body[:2000])
+        logger.info("A2A_DEBUG_REQ_RAW path=%s body=%s", request.url.path, body[:2000])
 
     async def _receive():
         return {"type": "http.request", "body": body, "more_body": False}
@@ -214,9 +233,13 @@ async def _debug_a2a_io(request: Request, call_next):
     full = b"".join(chunks)
     try:
         parsed = _json_dbg.loads(full)
-        logger.info("A2A_DEBUG_RESP: %s", _json_dbg.dumps(parsed, default=str)[:4000])
+        logger.info(
+            "A2A_DEBUG_RESP path=%s body=%s",
+            request.url.path,
+            _json_dbg.dumps(parsed, default=str)[:4000],
+        )
     except Exception:
-        logger.info("A2A_DEBUG_RESP_RAW: %s", full[:2000])
+        logger.info("A2A_DEBUG_RESP_RAW path=%s body=%s", request.url.path, full[:2000])
 
     return StarletteResponse(
         content=full,
@@ -426,8 +449,7 @@ def _build_task(
 ) -> dict[str, Any]:
     """Build an A2A v1.0 Task object.
 
-    Always includes `artifacts` array (empty when no text). Each part
-    declares both `kind` and `type` fields with value "text" — A2A v1.0
+    Each part declares both `kind` and `type` fields with value "text" —
     spec uses `kind`, but some clients read `type`. Cheap insurance.
     """
     task: dict[str, Any] = {
@@ -463,10 +485,6 @@ def _extract_from_natural_language(text: str) -> dict[str, Any]:
 
     Po sends raw user text rather than JSON. We try to pull medications
     and patient context out of it.
-
-    Example: 'Generate deprescribing plan for patient with these
-              medications: warfarin, aspirin. Patient context:
-              78 year old male, CKD stage 3.'
     """
     result: dict[str, Any] = {"medications": [], "patient": {}}
 
@@ -845,6 +863,18 @@ def _format_pipeline_result_markdown(
 
 
 def _build_agent_card() -> dict[str, Any]:
+    """Build the A2A v1.0 agent card.
+
+    The top-level `url` field is what most A2A v1.0 clients (including
+    Prompt Opinion) use as the JSON-RPC endpoint — they POST message/send
+    and tasks/get there directly. supportedInterfaces is supplemental.
+    Without a top-level `url`, Po falls back to the base URL (e.g. /),
+    which previously returned 404 since we only mounted /a2a/v1.
+
+    Now that the JSON-RPC handler lives at BOTH / and /a2a/v1, we point
+    `url` to /a2a/v1 (the canonical path) and Po still works because the
+    same handler answers at /.
+    """
     return {
         "name": "ARIA",
         "description": (
@@ -854,6 +884,8 @@ def _build_agent_card() -> dict[str, Any]:
         ),
         "version": "0.1.0",
         "protocolVersion": A2A_PROTOCOL_VERSION,
+        "url": f"{PUBLIC_AGENT_URL}/a2a/v1",
+        "preferredTransport": "JSONRPC",
         "provider": {
             "organization": "Wiqi Labs",
             "url": "https://github.com/wiqilee/ARIA",
@@ -861,13 +893,7 @@ def _build_agent_card() -> dict[str, Any]:
         "capabilities": {
             "streaming": False,
             "pushNotifications": False,
-            # Blocking-first: most clients (including Po) get state=completed
-            # in the same response. asyncTasks is technically supported (we
-            # do return state=working when the budget expires, and tasks/get
-            # works) but we don't advertise it because some clients then
-            # expect immediate state=working and never block — which would
-            # break the simple-client case. Polling clients still work; we
-            # just don't promise it on the card.
+            "stateTransitionHistory": False,
             "asyncTasks": False,
             "experimental": {
                 "fhirContextExtension": {
@@ -958,11 +984,7 @@ async def _run_pipeline_and_store(
     patient: Any,
     fhir_ctx: dict[str, Any],
 ) -> None:
-    """Run the pipeline and store the resulting Task state.
-
-    Always writes a final state (completed or failed) to TASK_STORE so a
-    polling client always gets a valid response from tasks/get.
-    """
+    """Run the pipeline and store the resulting Task state."""
     try:
         result = await _run_pipeline_with_timeout(medications, patient, fhir_ctx)
         markdown = _format_pipeline_result_markdown(medications, patient, result)
@@ -1035,6 +1057,12 @@ async def analyze(request: AnalyzeRequest, http_request: Request):
         raise HTTPException(status_code=500, detail=f"Analysis failed: {e}")
 
 
+@app.get("/")
+async def root_get():
+    """Some A2A clients probe the root URL for an agent card. Serve it."""
+    return _build_agent_card()
+
+
 @app.get("/.well-known/agent.json")
 async def agent_card_legacy():
     return _build_agent_card()
@@ -1045,6 +1073,9 @@ async def agent_card_standard():
     return _build_agent_card()
 
 
+# Both / and /a2a/v1 hit the same JSON-RPC handler. Po POSTs JSON-RPC to
+# the agent card's top-level `url` field; other clients use /a2a/v1.
+@app.post("/")
 @app.post("/a2a/v1")
 async def a2a_jsonrpc(request: Request):
     """A2A v1.0 JSON-RPC 2.0 endpoint."""
@@ -1054,7 +1085,12 @@ async def a2a_jsonrpc(request: Request):
         logger.error("A2A: invalid JSON body: %s", e)
         return _jsonrpc_error(None, -32700, "Parse error")
 
-    logger.info("A2A: method=%s id=%s", raw.get("method"), raw.get("id"))
+    logger.info(
+        "A2A: path=%s method=%s id=%s",
+        request.url.path,
+        raw.get("method"),
+        raw.get("id"),
+    )
 
     try:
         rpc = JSONRPCRequest(**raw)
@@ -1132,7 +1168,6 @@ async def _handle_message_send(
     if final_task is None:
         final_task = _build_task(task_id, context_id, "working")
 
-    # Defensive: never return a completed task with empty artifacts.
     state = (final_task.get("status") or {}).get("state")
     if state == "completed" and not final_task.get("artifacts"):
         logger.error(
