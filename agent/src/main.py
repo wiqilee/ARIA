@@ -9,7 +9,8 @@ Key v1.0 changes from v0.3:
   (Appendix A.2.1 of the v1.0 spec)
 - Removed top-level `url` and `preferredTransport` from Agent Card
 - Renamed `additionalInterfaces` -> `supportedInterfaces` (ordered list,
-  most preferred first)
+  most preferred first). Each entry must include `protocolBinding` and
+  `protocolVersion` per Po's deserializer.
 - Removed `capabilities.stateTransitionHistory`
 
 FHIR access context propagation through TWO channels:
@@ -820,6 +821,14 @@ def _build_agent_card() -> dict[str, Any]:
       `capabilities.stateTransitionHistory`
     - Renamed: `additionalInterfaces` → `supportedInterfaces` (ordered
       list, most preferred transport first)
+
+    Each AgentInterface entry MUST include `protocolBinding` and
+    `protocolVersion`. Po's deserializer rejects entries that omit
+    these fields with:
+      "JSON deserialization for type 'A2A.AgentInterface' was missing
+       required properties including: 'protocolBinding', 'protocolVersion'"
+    We also include `transport` for compatibility with clients reading
+    the upstream A2A v1.0 spec field name.
     """
     endpoint = f"{PUBLIC_AGENT_URL}/a2a/v1"
     return {
@@ -851,6 +860,8 @@ def _build_agent_card() -> dict[str, Any]:
         "supportedInterfaces": [
             {
                 "url": endpoint,
+                "protocolBinding": "JSONRPC",
+                "protocolVersion": A2A_PROTOCOL_VERSION,
                 "transport": "JSONRPC",
             }
         ],
