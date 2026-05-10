@@ -1,22 +1,16 @@
 """ARIA A2A Agent: FastAPI entrypoint with A2A v1.0 (JSON-RPC) protocol support.
 
-Implements the A2A v1.0 specification per
-https://a2a-protocol.org/v1.0.0/specification/ and the Po-specific
-migration guide at https://docs.promptopinion.ai/a2a-v1-migration.
+CRITICAL v1.0 wire format per official A2A spec:
+https://github.com/a2aproject/a2a-dotnet/blob/main/docs/migration-guide-v1.md
 
-Defensive serialization for Po's strict v1.0 deserializer:
-- `kind: "task"` discriminator on Task object
-- `kind: "text"` discriminator on each TextPart (NOT `type` — that
-  triggers ambiguous-discriminator errors in pydantic-style parsers)
-- `history: []` and `artifacts: []` always present
-- `metadata: {}` empty objects where the spec marks them optional
-- ISO 8601 timestamps with Z suffix per spec section 5.6.1
+1. Response is wrapped: result.task = {...} (NOT result = {kind:"task",...})
+2. State enums use SCREAMING_SNAKE_CASE: "TASK_STATE_COMPLETED"
+3. Parts are FLAT, no kind discriminator: {"text": "..."}
+4. Role: "ROLE_USER" / "ROLE_AGENT"
 
 FHIR access context propagation through TWO channels:
-1. A2A Extension payload (Po native, camelCase JSON):
-   https://app.promptopinion.ai/schemas/a2a/v1/fhir-context
-2. SHARP HTTP headers:
-   X-FHIR-Server-URL, X-FHIR-Access-Token, X-Patient-ID
+1. A2A Extension payload: https://app.promptopinion.ai/schemas/a2a/v1/fhir-context
+2. SHARP HTTP headers: X-FHIR-Server-URL, X-FHIR-Access-Token, X-Patient-ID
 """
 
 from __future__ import annotations
@@ -90,6 +84,12 @@ PO_FHIR_CONTEXT_EXTENSION_URI = (
 SHARP_HEADER_FHIR_SERVER_URL = "X-FHIR-Server-URL"
 SHARP_HEADER_ACCESS_TOKEN = "X-FHIR-Access-Token"
 SHARP_HEADER_PATIENT_ID = "X-Patient-ID"
+
+# A2A v1.0 ProtoJSON state enum mapping
+TASK_STATE_WORKING = "TASK_STATE_WORKING"
+TASK_STATE_COMPLETED = "TASK_STATE_COMPLETED"
+TASK_STATE_FAILED = "TASK_STATE_FAILED"
+TASK_STATE_SUBMITTED = "TASK_STATE_SUBMITTED"
 
 # ── MCP Client ──────────────────────────────────────────────
 
@@ -377,7 +377,7 @@ def _merge_fhir_into_payload(
     return payload
 
 
-# ── A2A Helpers ─────────────────────────────────────────────
+# ── A2A v1.0 Helpers ────────────────────────────────────────
 
 
 def _now_iso() -> str:
@@ -397,36 +397,29 @@ def _jsonrpc_error(req_id: Any, code: int, message: str) -> dict[str, Any]:
     }
 
 
-def _build_task(
+def _build_task_inner(
     task_id: str,
     context_id: str,
     state: str,
     text: str | None = None,
     artifact_name: str = "aria-analysis",
 ) -> dict[str, Any]:
-    """Build an A2A v1.0 Task object.
+    """Build the INNER Task object (without the {"task": ...} wrapper).
 
-    Critical defensive serialization for Po's strict deserializer:
-    - `kind: "task"` is the discriminator that Po's SDK uses to identify
-      this as a Task (vs Message) response.
-    - Each TextPart uses ONLY `kind: "text"` — NOT `type: "text"`.
-      Including both fields creates an ambiguous discriminator that
-      pydantic-style Part union parsers reject.
-    - history: [] and artifacts: [] always present, never omitted.
-    - metadata: {} empty objects are safer than missing fields for
-      strict deserializers.
+    A2A v1.0 ProtoJSON wire format per official spec:
+    - State enum is SCREAMING_SNAKE_CASE: TASK_STATE_COMPLETED, etc.
+    - Parts are FLAT — no kind discriminator: just {"text": "..."}
+    - This object will be wrapped as {"task": {...}} when returned via JSON-RPC.
     """
     task: dict[str, Any] = {
         "id": task_id,
         "contextId": context_id,
-        "kind": "task",
         "status": {
             "state": state,
             "timestamp": _now_iso(),
         },
         "history": [],
         "artifacts": [],
-        "metadata": {},
     }
     if text:
         task["artifacts"] = [
@@ -434,15 +427,22 @@ def _build_task(
                 "artifactId": str(uuid.uuid4()),
                 "name": artifact_name,
                 "parts": [
-                    {
-                        "kind": "text",
-                        "text": text,
-                    }
+                    {"text": text},  # v1.0 flat format — no kind field
                 ],
-                "metadata": {},
             }
         ]
     return task
+
+
+def _wrap_task_response(task_inner: dict[str, Any]) -> dict[str, Any]:
+    """Wrap inner Task into the v1.0 result envelope: {"task": {...}}.
+
+    Per A2A v1.0 spec, JSON-RPC responses use named wrappers instead of
+    kind discriminators:
+        v0.3: result = {"kind": "task", "id": "...", ...}
+        v1.0: result = {"task": {"id": "...", ...}}
+    """
+    return {"task": task_inner}
 
 
 # ── Natural Language Payload Extraction ─────────────────────
@@ -488,6 +488,11 @@ def _extract_from_natural_language(text: str) -> dict[str, Any]:
 
 
 def _parse_message_content(parts: list[dict[str, Any]]) -> dict[str, Any]:
+    """Extract text from message parts.
+
+    Supports both v0.3 ({"kind":"text","text":...}) and v1.0 ({"text":...})
+    formats — v1.0 is flat with no kind field, just the text field.
+    """
     content_pieces: list[str] = []
     for p in parts:
         if not isinstance(p, dict):
@@ -917,7 +922,7 @@ async def _run_pipeline_and_store(
         result = await _run_pipeline_with_timeout(medications, patient, fhir_ctx)
         markdown = _format_pipeline_result_markdown(medications, patient, result)
         await TASK_STORE.set(
-            task_id, _build_task(task_id, context_id, "completed", markdown)
+            task_id, _build_task_inner(task_id, context_id, TASK_STATE_COMPLETED, markdown)
         )
         logger.info("A2A async: task %s completed", task_id)
     except asyncio.TimeoutError:
@@ -928,13 +933,13 @@ async def _run_pipeline_and_store(
             f"REST endpoint directly:\n\n`POST {PUBLIC_AGENT_URL}/analyze`"
         )
         await TASK_STORE.set(
-            task_id, _build_task(task_id, context_id, "failed", msg)
+            task_id, _build_task_inner(task_id, context_id, TASK_STATE_FAILED, msg)
         )
         logger.error("A2A async: task %s timed out", task_id)
     except Exception as e:
         msg = f"❌ Analysis failed: {type(e).__name__}: {e}"
         await TASK_STORE.set(
-            task_id, _build_task(task_id, context_id, "failed", msg)
+            task_id, _build_task_inner(task_id, context_id, TASK_STATE_FAILED, msg)
         )
         logger.error("A2A async: task %s failed: %s", task_id, e, exc_info=True)
 
@@ -1061,11 +1066,12 @@ async def _handle_message_send(
             "Please send a list of drugs, e.g. 'warfarin, aspirin, ibuprofen' "
             "with patient context like '78 year old male with CKD stage 3'."
         )
-        return _jsonrpc_result(
-            rpc.id, _build_task(task_id, context_id, "failed", validation_msg)
-        )
+        task_inner = _build_task_inner(task_id, context_id, TASK_STATE_FAILED, validation_msg)
+        return _jsonrpc_result(rpc.id, _wrap_task_response(task_inner))
 
-    await TASK_STORE.set(task_id, _build_task(task_id, context_id, "working"))
+    await TASK_STORE.set(
+        task_id, _build_task_inner(task_id, context_id, TASK_STATE_WORKING)
+    )
 
     pipeline_task = asyncio.create_task(
         _run_pipeline_and_store(
@@ -1088,22 +1094,23 @@ async def _handle_message_send(
             task_id, PO_BLOCKING_BUDGET_SECONDS,
         )
 
-    final_task = await TASK_STORE.get(task_id)
-    if final_task is None:
-        final_task = _build_task(task_id, context_id, "working")
+    final_task_inner = await TASK_STORE.get(task_id)
+    if final_task_inner is None:
+        final_task_inner = _build_task_inner(task_id, context_id, TASK_STATE_WORKING)
 
-    state = (final_task.get("status") or {}).get("state")
-    if state == "completed" and not final_task.get("artifacts"):
+    state = (final_task_inner.get("status") or {}).get("state")
+    if state == TASK_STATE_COMPLETED and not final_task_inner.get("artifacts"):
         logger.error(
             "A2A: task %s state=completed but artifacts empty — coercing to failed",
             task_id,
         )
-        final_task = _build_task(
-            task_id, context_id, "failed",
+        final_task_inner = _build_task_inner(
+            task_id, context_id, TASK_STATE_FAILED,
             "Analysis completed but produced no artifacts. This is an internal error.",
         )
 
-    return _jsonrpc_result(rpc.id, final_task)
+    # CRITICAL: A2A v1.0 wraps Task in {"task": {...}} per spec.
+    return _jsonrpc_result(rpc.id, _wrap_task_response(final_task_inner))
 
 
 async def _handle_tasks_get(rpc: JSONRPCRequest) -> dict[str, Any]:
@@ -1115,21 +1122,22 @@ async def _handle_tasks_get(rpc: JSONRPCRequest) -> dict[str, Any]:
     if not task_id or not isinstance(task_id, str):
         return _jsonrpc_error(rpc.id, -32602, "Missing or invalid task id in tasks/get params")
 
-    task = await TASK_STORE.get(task_id)
-    if task is None:
+    task_inner = await TASK_STORE.get(task_id)
+    if task_inner is None:
         return _jsonrpc_error(
             rpc.id, -32602, f"Task not found: {task_id} (may have been evicted)"
         )
 
     logger.info(
         "A2A: tasks/get id=%s state=%s",
-        task_id, (task.get("status") or {}).get("state"),
+        task_id, (task_inner.get("status") or {}).get("state"),
     )
-    return _jsonrpc_result(rpc.id, task)
+    return _jsonrpc_result(rpc.id, _wrap_task_response(task_inner))
 
 
 @app.post("/a2a/tasks/send")
 async def a2a_task_send_legacy(task: A2ATaskRequest, http_request: Request):
+    """Legacy v0.3-style endpoint kept for backwards compat. Uses old format."""
     message = task.message if isinstance(task.message, dict) else {}
     parts = message.get("parts", []) if isinstance(message, dict) else []
     fhir_ctx = _extract_fhir_context(http_request, message)
@@ -1143,7 +1151,7 @@ async def a2a_task_send_legacy(task: A2ATaskRequest, http_request: Request):
             "id": task.id,
             "status": {"state": "failed"},
             "artifacts": [
-                {"parts": [{"kind": "text", "text": "No medications and no FHIR patient context provided."}]}
+                {"parts": [{"text": "No medications and no FHIR patient context provided."}]}
             ],
         }
 
@@ -1153,14 +1161,14 @@ async def a2a_task_send_legacy(task: A2ATaskRequest, http_request: Request):
         return {
             "id": task.id,
             "status": {"state": "completed"},
-            "artifacts": [{"parts": [{"kind": "text", "text": markdown}]}],
+            "artifacts": [{"parts": [{"text": markdown}]}],
         }
     except asyncio.TimeoutError:
         return {
             "id": task.id,
             "status": {"state": "failed"},
             "artifacts": [
-                {"parts": [{"kind": "text", "text": f"Analysis timed out after {PIPELINE_TIMEOUT_SECONDS}s"}]}
+                {"parts": [{"text": f"Analysis timed out after {PIPELINE_TIMEOUT_SECONDS}s"}]}
             ],
         }
     except Exception as e:
@@ -1168,7 +1176,7 @@ async def a2a_task_send_legacy(task: A2ATaskRequest, http_request: Request):
         return {
             "id": task.id,
             "status": {"state": "failed"},
-            "artifacts": [{"parts": [{"kind": "text", "text": f"Analysis failed: {e}"}]}],
+            "artifacts": [{"parts": [{"text": f"Analysis failed: {e}"}]}],
         }
 
 
