@@ -369,12 +369,12 @@ curl -s -X POST https://aria-a2a-agent-233281205053.asia-southeast2.run.app/a2a/
   -H "Content-Type: application/json" \
   -d '{
     "jsonrpc":"2.0","id":"demo-1","method":"message/send",
-    "params":{"message":{"role":"user","messageId":"m1","kind":"message",
-    "parts":[{"kind":"text","text":"{\"medications\":[\"warfarin\",\"aspirin\"],\"patient\":{\"age\":78,\"sex\":\"male\",\"ckd_stage\":3}}"}]}}
+    "params":{"message":{"role":"ROLE_USER","messageId":"m1",
+    "parts":[{"text":"{\"medications\":[\"warfarin\",\"aspirin\"],\"patient\":{\"age\":78,\"sex\":\"male\",\"ckd_stage\":3}}"}]}}
   }' | python3 -m json.tool | head -20
 ```
 
-Expected response: a JSON-RPC envelope with `"status": {"state": "completed"}` and an `aria-analysis` artifact containing the full structured polypharmacy report.
+Expected response: a JSON-RPC envelope where `result.task.status.state` is `"TASK_STATE_COMPLETED"` and `result.task.artifacts[0]` is the `aria-analysis` artifact containing the full structured polypharmacy report. The response is wrapped in the v1.0 `{"task": {...}}` envelope per the official A2A specification; legacy v0.3-style requests (with `"role": "user"` and `"kind": "text"` on parts) are also accepted for backward compatibility.
 
 ### Production Deployment Stack
 

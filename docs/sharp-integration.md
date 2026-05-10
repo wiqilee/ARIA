@@ -141,11 +141,10 @@ If the bearer token contains a `patient` claim (per SMART App Launch v2), ARIA p
   "method": "message/send",
   "params": {
     "message": {
-      "role": "user",
+      "role": "ROLE_USER",
       "messageId": "m1",
-      "kind": "message",
       "parts": [
-        { "kind": "text", "text": "Analyze active medications for this patient" }
+        { "text": "Analyze active medications for this patient" }
       ],
       "extensions": {
         "https://app.promptopinion.ai/schemas/a2a/v1/fhir-context": {
@@ -160,6 +159,8 @@ If the bearer token contains a `patient` claim (per SMART App Launch v2), ARIA p
   }
 }
 ```
+
+The example above uses the A2A v1.0 ProtoJSON wire format (`ROLE_USER` role enum, flat parts without a `kind` discriminator). The endpoint also accepts the legacy v0.3 shape (`"role": "user"`, `"kind": "message"` on the message, `"kind": "text"` on each part) for backward compatibility with clients that have not migrated yet.
 
 ## Channel 2: SHARP HTTP Headers
 
@@ -211,6 +212,8 @@ Content-Type: application/json
   "method": "message/send",
   "params": {
     "message": {
+      "role": "ROLE_USER",
+      "messageId": "m1",
       "extensions": {
         "https://app.promptopinion.ai/schemas/a2a/v1/fhir-context": {
           "fhirUrl":   "https://fhir.epic.com/interconnect-fhir-oauth/api/FHIR/R4",
@@ -218,7 +221,7 @@ Content-Type: application/json
           "patientId": "erXuFYUfucBZaryVksYEcMg3"
         }
       },
-      "parts": [{ "kind": "text", "text": "{}" }]
+      "parts": [{ "text": "{}" }]
     }
   }
 }
@@ -358,10 +361,9 @@ curl -s -X POST https://aria-a2a-agent-233281205053.asia-southeast2.run.app/a2a/
     "method": "message/send",
     "params": {
       "message": {
-        "role": "user",
+        "role": "ROLE_USER",
         "messageId": "m1",
-        "kind": "message",
-        "parts": [{ "kind": "text", "text": "{}" }],
+        "parts": [{ "text": "{}" }],
         "extensions": {
           "https://app.promptopinion.ai/schemas/a2a/v1/fhir-context": {
             "fhirUrl":   "https://hapi.fhir.org/baseR4",
@@ -386,7 +388,7 @@ curl -s -X POST https://aria-a2a-agent-233281205053.asia-southeast2.run.app/a2a/
     "jsonrpc": "2.0",
     "id": "req-1",
     "method": "message/send",
-    "params": { "message": { "parts": [{ "kind": "text", "text": "{}" }] } }
+    "params": { "message": { "role": "ROLE_USER", "messageId": "m1", "parts": [{ "text": "{}" }] } }
   }'
 ```
 

@@ -177,16 +177,15 @@ curl -s -X POST http://localhost:8000/a2a/v1 \
     "method": "message/send",
     "params": {
       "message": {
-        "role": "user",
+        "role": "ROLE_USER",
         "messageId": "m1",
-        "kind": "message",
-        "parts": [{"kind": "text", "text": "{\"medications\":[\"warfarin\",\"aspirin\"],\"patient\":{\"age\":78,\"sex\":\"male\",\"ckd_stage\":3}}"}]
+        "parts": [{"text": "{\"medications\":[\"warfarin\",\"aspirin\"],\"patient\":{\"age\":78,\"sex\":\"male\",\"ckd_stage\":3}}"}]
       }
     }
   }'
 ```
 
-Expected response: a JSON-RPC envelope with `"status": {"state": "completed"}` and an `aria-analysis` artifact.
+Expected response: a JSON-RPC envelope where `result.task.status.state` is `"TASK_STATE_COMPLETED"` and `result.task.artifacts[0]` is the `aria-analysis` artifact. ARIA's endpoint also accepts the legacy v0.3 wire format (`"role": "user"`, `"kind": "text"` on parts) for backward compatibility with older clients.
 
 ## Troubleshooting
 
