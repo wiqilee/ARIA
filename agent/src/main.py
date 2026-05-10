@@ -13,32 +13,32 @@ Both channels resolve to the same internal context, with Channel 1 taking
 precedence when both are present. See docs/sharp-integration.md for the
 full propagation flow and fallback ladder.
 
-A2A v1.0 lifecycle (working -> completed/failed):
+A2A v1.0 lifecycle (blocking-first):
 
     POST /a2a/v1 message/send
-      → server starts pipeline in background, waits up to
-        PO_BLOCKING_BUDGET_SECONDS for it to finish.
-        - If finished: returns Task state="completed" synchronously
-          (compatible with blocking-only A2A clients).
-        - If not finished: returns Task state="working" with the task_id;
-          background processing continues; client can poll tasks/get.
+      → server runs the pipeline and waits up to PO_BLOCKING_BUDGET_SECONDS
+        for it to finish.
+        - Finished: returns Task state="completed" with markdown artifact.
+        - Not finished: returns Task state="working" with task_id; client
+          can poll tasks/get to retrieve the eventual completed/failed
+          state. Background coroutine is shielded from cancellation.
 
     POST /a2a/v1 tasks/get
       → returns the latest stored Task snapshot for the given task_id.
-        Polled until state="completed" (or "failed").
 
-This hybrid lets ARIA stay responsive both to Po (blocking client up to
-~60s) and to standard A2A v1.0 polling clients (no upper bound), without
-the single-call wall-clock budget collapsing the integration when the
-pipeline runs slow due to upstream Gemini latency.
+This blocking-first design keeps simple A2A clients (like Po, which seem
+to expect a fully-resolved task in the same response) happy in the common
+case where pipelines finish in <60s.
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
+import json as _json_dbg
 import logging
 import os
+import re
 import sys
 import uuid
 from collections import OrderedDict
@@ -51,6 +51,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+from starlette.responses import Response as StarletteResponse
 
 # Ensure src/ is importable
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -72,30 +73,25 @@ MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "http://localhost:8080")
 HOST = os.getenv("HOST", "0.0.0.0")
 PORT = int(os.getenv("PORT", "8000"))
 
-# Public-facing URL for A2A agent card (used by external clients like Prompt Opinion).
 PUBLIC_AGENT_URL = os.getenv("PUBLIC_AGENT_URL", f"http://{HOST}:{PORT}")
 
-# A2A protocol version this agent implements.
 A2A_PROTOCOL_VERSION = "1.0"
 
-# Hard ceiling for pipeline execution. After this many seconds the
-# background coroutine is cancelled and the task transitions to "failed".
-# Set generously (3 minutes) — clients with shorter blocking tolerances
-# (like Po) are protected separately by PO_BLOCKING_BUDGET_SECONDS below.
+# Hard ceiling for pipeline execution. After this, the background coroutine
+# is cancelled and the task transitions to "failed".
 PIPELINE_TIMEOUT_SECONDS = int(os.getenv("PIPELINE_TIMEOUT_SECONDS", "180"))
 
-# Soft client-blocking budget. When a client calls message/send, we run
-# the pipeline in the background and wait at most this long before
-# responding. If the pipeline finishes inside the budget, we return
-# state="completed" synchronously — that keeps blocking-only A2A clients
-# happy. If the pipeline is still running when the budget expires, we
-# return state="working" with the task id and let the pipeline finish
-# asynchronously; the client can poll tasks/get to retrieve the final
-# state. Tune this just below the client's HTTP timeout (Po's appears
-# to be ~60s for blocking SendA2AMessage calls).
-PO_BLOCKING_BUDGET_SECONDS = int(os.getenv("PO_BLOCKING_BUDGET_SECONDS", "50"))
+# Blocking budget: how long message/send will wait synchronously before
+# returning "working". Set near the upper end so simple clients (like Po)
+# always see a fully-completed task. The background coroutine is shielded,
+# so even if this expires the pipeline still finishes — polling clients
+# can retrieve it via tasks/get.
+PO_BLOCKING_BUDGET_SECONDS = int(os.getenv("PO_BLOCKING_BUDGET_SECONDS", "170"))
 
-# Method aliases accepted on the JSON-RPC endpoint.
+# Toggle to dump every /a2a/v1 request and response body to logs. Useful
+# while debugging client-specific quirks. Set DEBUG_A2A=0 to disable.
+DEBUG_A2A = os.getenv("DEBUG_A2A", "1") == "1"
+
 A2A_SEND_METHODS = frozenset({
     "message/send",
     "tasks/send",
@@ -109,12 +105,10 @@ A2A_GET_METHODS = frozenset({
     "getTask",
 })
 
-# Prompt Opinion's official A2A FHIR Context extension URI.
 PO_FHIR_CONTEXT_EXTENSION_URI = (
     "https://app.promptopinion.ai/schemas/a2a/v1/fhir-context"
 )
 
-# SHARP Extension Specs header names (sharp-on-fhir-mcp compatibility channel).
 SHARP_HEADER_FHIR_SERVER_URL = "X-FHIR-Server-URL"
 SHARP_HEADER_ACCESS_TOKEN = "X-FHIR-Access-Token"
 SHARP_HEADER_PATIENT_ID = "X-Patient-ID"
@@ -127,14 +121,7 @@ mcp_client = MCPClient(MCP_SERVER_URL)
 
 
 class TaskStore:
-    """Bounded in-memory task store with FIFO eviction.
-
-    A2A clients that don't complete a request synchronously can come
-    back later with tasks/get(taskId) to fetch the final state.
-    Cloud Run instances are short-lived and tasks are ephemeral, so
-    a process-local store is fine for the hackathon scope. For
-    production, swap this for Redis or Memorystore.
-    """
+    """Bounded in-memory task store with FIFO eviction."""
 
     def __init__(self, max_tasks: int = 1000):
         self._store: OrderedDict[str, dict[str, Any]] = OrderedDict()
@@ -175,9 +162,10 @@ async def lifespan(app: FastAPI):
         )
     logger.info("Public agent URL: %s", PUBLIC_AGENT_URL)
     logger.info(
-        "Pipeline timeout: %ds, Po blocking budget: %ds",
+        "Pipeline timeout: %ds, blocking budget: %ds, debug: %s",
         PIPELINE_TIMEOUT_SECONDS,
         PO_BLOCKING_BUDGET_SECONDS,
+        DEBUG_A2A,
     )
     yield
     logger.info("ARIA Agent shutting down")
@@ -191,6 +179,52 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+
+# ── Debug Middleware (capture A2A I/O) ──────────────────────
+
+
+@app.middleware("http")
+async def _debug_a2a_io(request: Request, call_next):
+    """Log full A2A request/response bodies for client interop debugging.
+
+    Only active when DEBUG_A2A=1. Read the request body, log it, then
+    reconstruct the request so downstream handlers still see the body.
+    Capture the response by draining body_iterator and rebuilding.
+    """
+    if not DEBUG_A2A or request.url.path != "/a2a/v1" or request.method != "POST":
+        return await call_next(request)
+
+    body = await request.body()
+    try:
+        parsed = _json_dbg.loads(body)
+        logger.info("A2A_DEBUG_REQ: %s", _json_dbg.dumps(parsed, default=str)[:3000])
+    except Exception:
+        logger.info("A2A_DEBUG_REQ_RAW: %s", body[:2000])
+
+    async def _receive():
+        return {"type": "http.request", "body": body, "more_body": False}
+
+    rebuilt_request = Request(request.scope, _receive)
+    response = await call_next(rebuilt_request)
+
+    chunks: list[bytes] = []
+    async for chunk in response.body_iterator:
+        chunks.append(chunk)
+    full = b"".join(chunks)
+    try:
+        parsed = _json_dbg.loads(full)
+        logger.info("A2A_DEBUG_RESP: %s", _json_dbg.dumps(parsed, default=str)[:4000])
+    except Exception:
+        logger.info("A2A_DEBUG_RESP_RAW: %s", full[:2000])
+
+    return StarletteResponse(
+        content=full,
+        status_code=response.status_code,
+        headers=dict(response.headers),
+        media_type=response.media_type,
+    )
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -255,7 +289,7 @@ class A2ATaskRequest(BaseModel):
     message: dict[str, Any]
 
 
-# ── FHIR Context Extraction (Two Channels) ──────────────────
+# ── FHIR Context Extraction ─────────────────────────────────
 
 
 def _extract_fhir_context_from_extension(
@@ -392,9 +426,9 @@ def _build_task(
 ) -> dict[str, Any]:
     """Build an A2A v1.0 Task object.
 
-    For "working" or "submitted" states, pass text=None to omit artifacts
-    entirely (cleaner shape for poll responses). For "completed" / "failed"
-    pass the text (markdown report or error message).
+    Always includes `artifacts` array (empty when no text). Each part
+    declares both `kind` and `type` fields with value "text" — A2A v1.0
+    spec uses `kind`, but some clients read `type`. Cheap insurance.
     """
     task: dict[str, Any] = {
         "id": task_id,
@@ -402,16 +436,115 @@ def _build_task(
         "kind": "task",
         "status": {"state": state, "timestamp": _now_iso()},
         "artifacts": [],
+        "history": [],
     }
     if text:
         task["artifacts"] = [
             {
                 "artifactId": str(uuid.uuid4()),
                 "name": artifact_name,
-                "parts": [{"kind": "text", "text": text}],
+                "parts": [
+                    {
+                        "kind": "text",
+                        "type": "text",
+                        "text": text,
+                    }
+                ],
             }
         ]
     return task
+
+
+# ── Natural Language Payload Extraction ─────────────────────
+
+
+def _extract_from_natural_language(text: str) -> dict[str, Any]:
+    """Best-effort extractor for chat-style prompts.
+
+    Po sends raw user text rather than JSON. We try to pull medications
+    and patient context out of it.
+
+    Example: 'Generate deprescribing plan for patient with these
+              medications: warfarin, aspirin. Patient context:
+              78 year old male, CKD stage 3.'
+    """
+    result: dict[str, Any] = {"medications": [], "patient": {}}
+
+    med_match = re.search(
+        r"(?:medications?|drugs?|meds?)\s*[:=]\s*([^.]+?)(?:\.|$|patient|context|with\s+|having\s+)",
+        text,
+        re.IGNORECASE,
+    )
+    if med_match:
+        raw = med_match.group(1)
+        meds = [m.strip().rstrip(".,") for m in re.split(r"[,;]|\sand\s", raw) if m.strip()]
+        meds = [
+            m for m in meds
+            if 2 < len(m) < 60 and not m.lower().startswith(("a ", "an ", "the "))
+        ]
+        result["medications"] = meds
+
+    age_match = re.search(r"(\d{1,3})\s*(?:year|yo|y/o|years?\s*old)", text, re.IGNORECASE)
+    if age_match:
+        result["patient"]["age"] = int(age_match.group(1))
+
+    if re.search(r"\bfemale\b", text, re.IGNORECASE):
+        result["patient"]["sex"] = "female"
+    elif re.search(r"\bmale\b", text, re.IGNORECASE):
+        result["patient"]["sex"] = "male"
+
+    ckd_match = re.search(r"CKD\s*(?:stage\s*)?(\d)", text, re.IGNORECASE)
+    if ckd_match:
+        result["patient"]["ckd_stage"] = int(ckd_match.group(1))
+
+    if re.search(r"hepatic\s*impairment|liver\s*(?:failure|disease|impairment)", text, re.IGNORECASE):
+        result["patient"]["hepatic_impairment"] = True
+
+    if re.search(r"\bsmoker?\b|\bsmoking\b", text, re.IGNORECASE):
+        result["patient"]["smoking"] = True
+
+    return result
+
+
+def _parse_message_content(parts: list[dict[str, Any]]) -> dict[str, Any]:
+    content_pieces: list[str] = []
+    for p in parts:
+        if not isinstance(p, dict):
+            continue
+        if "text" in p:
+            content_pieces.append(p.get("text") or "")
+    content = "".join(content_pieces).strip()
+
+    if not content:
+        return {}
+
+    # Strict JSON first
+    try:
+        data = json.loads(content)
+        if isinstance(data, dict) and ("medications" in data or "patient" in data or "fhir" in data):
+            return data
+    except json.JSONDecodeError:
+        pass
+
+    # Natural-language fallback
+    extracted = _extract_from_natural_language(content)
+    if extracted.get("medications") or extracted.get("patient"):
+        logger.info(
+            "NL extracted: meds=%s patient=%s",
+            extracted.get("medications"),
+            extracted.get("patient"),
+        )
+        return extracted
+
+    # Last resort: comma split
+    return {"medications": [m.strip() for m in content.split(",") if m.strip() and len(m.strip()) < 60]}
+
+
+def _payload_to_pipeline_args(payload: dict[str, Any]) -> tuple[list, Any, dict[str, Any]]:
+    medications = payload.get("medications") or []
+    patient = payload.get("patient")
+    fhir = payload.get("fhir") or {}
+    return medications, patient, fhir
 
 
 # ── Markdown Clinical Report Formatter ──────────────────────
@@ -470,20 +603,7 @@ def _format_pipeline_result_markdown(
     patient: Any,
     result: dict[str, Any],
 ) -> str:
-    """Convert the ARIA pipeline result into a clinical Markdown report.
-
-    Reads the actual schema produced by the Rust MCP tools:
-      - report.overall_risk_level             (string: low/moderate/high/critical)
-      - report.risk_scores[*].adjusted_score  (float, per-interaction)
-      - report.critical_findings              (list[str])
-      - raw_interactions.interactions[*]      (list[dict] with mechanism)
-      - temporal_model.daily_risk             (list[dict])
-      - temporal_model.intervention_windows   (list[dict])
-      - temporal_model.peak_risk_day          (int)
-      - deprescribing_plan.steps              (list[dict])
-      - deprescribing_plan.steps[*].monitoring (list[str])
-      - deprescribing_plan.warnings           (list[str])
-    """
+    """Convert the ARIA pipeline result into a clinical Markdown report."""
     report = result.get("report") or {}
     graph = result.get("interaction_graph") or {}
     temporal = result.get("temporal_model") or {}
@@ -741,10 +861,14 @@ def _build_agent_card() -> dict[str, Any]:
         "capabilities": {
             "streaming": False,
             "pushNotifications": False,
-            # We support the standard A2A v1.0 async lifecycle: a slow
-            # message/send may return state="working" with a task_id, and
-            # the client polls tasks/get to retrieve the eventual result.
-            "asyncTasks": True,
+            # Blocking-first: most clients (including Po) get state=completed
+            # in the same response. asyncTasks is technically supported (we
+            # do return state=working when the budget expires, and tasks/get
+            # works) but we don't advertise it because some clients then
+            # expect immediate state=working and never block — which would
+            # break the simple-client case. Polling clients still work; we
+            # just don't promise it on the card.
+            "asyncTasks": False,
             "experimental": {
                 "fhirContextExtension": {
                     "supported": True,
@@ -807,23 +931,7 @@ def _build_agent_card() -> dict[str, Any]:
     }
 
 
-# ── Pipeline Helper ─────────────────────────────────────────
-
-
-def _parse_message_content(parts: list[dict[str, Any]]) -> dict[str, Any]:
-    content = "".join(p.get("text", "") for p in parts if isinstance(p, dict) and "text" in p)
-    try:
-        data = json.loads(content) if content else {}
-    except json.JSONDecodeError:
-        data = {"medications": [m.strip() for m in content.split(",") if m.strip()]}
-    return data if isinstance(data, dict) else {}
-
-
-def _payload_to_pipeline_args(payload: dict[str, Any]) -> tuple[list, Any, dict[str, Any]]:
-    medications = payload.get("medications") or []
-    patient = payload.get("patient")
-    fhir = payload.get("fhir") or {}
-    return medications, patient, fhir
+# ── Pipeline Helpers ────────────────────────────────────────
 
 
 async def _run_pipeline_with_timeout(
@@ -939,23 +1047,14 @@ async def agent_card_standard():
 
 @app.post("/a2a/v1")
 async def a2a_jsonrpc(request: Request):
-    """A2A v1.0 JSON-RPC 2.0 endpoint.
-
-    Dispatches both message-send (message/send, tasks/send, SendMessage)
-    and task-get (tasks/get, GetTask) methods. Reads FHIR context from
-    BOTH channels (extension + headers) for send methods.
-    """
+    """A2A v1.0 JSON-RPC 2.0 endpoint."""
     try:
         raw = await request.json()
     except Exception as e:
         logger.error("A2A: invalid JSON body: %s", e)
         return _jsonrpc_error(None, -32700, "Parse error")
 
-    logger.info(
-        "A2A: method=%s id=%s",
-        raw.get("method"),
-        raw.get("id"),
-    )
+    logger.info("A2A: method=%s id=%s", raw.get("method"), raw.get("id"))
 
     try:
         rpc = JSONRPCRequest(**raw)
@@ -976,18 +1075,7 @@ async def _handle_message_send(
     rpc: JSONRPCRequest,
     request: Request,
 ) -> dict[str, Any]:
-    """Handle A2A v1.0 message/send with hybrid blocking + async lifecycle.
-
-    1. Extract payload + FHIR context.
-    2. If no medications and no FHIR patient — fail fast synchronously.
-    3. Otherwise: write initial "working" task to TASK_STORE, schedule
-       background pipeline, then wait up to PO_BLOCKING_BUDGET_SECONDS
-       for it to finish.
-    4. Whatever state the task is in when the budget expires (or earlier
-       if the pipeline finished) is returned. asyncio.shield ensures the
-       background coroutine keeps running past our wait_for so polling
-       clients eventually see the completed/failed state.
-    """
+    """Handle A2A v1.0 message/send with blocking-first behavior."""
     message = rpc.params.get("message", {}) or {}
     parts = message.get("parts", []) or []
 
@@ -997,39 +1085,34 @@ async def _handle_message_send(
     payload = _merge_fhir_into_payload(payload, fhir_ctx)
     medications, patient, pipeline_fhir = _payload_to_pipeline_args(payload)
 
+    logger.info(
+        "A2A send: meds=%s patient=%s fhir_keys=%s",
+        medications,
+        patient,
+        list(pipeline_fhir.keys()),
+    )
+
     task_id = str(uuid.uuid4())
     context_id = message.get("contextId") or str(uuid.uuid4())
 
     if not medications and not pipeline_fhir.get("patient_id"):
         validation_msg = (
-            "No medications and no FHIR patient context provided. "
-            "Send JSON with a 'medications' array, or supply the "
-            "FHIR Context A2A Extension, or SHARP headers "
-            "(X-Patient-ID, X-FHIR-Access-Token)."
+            "I couldn't extract any medications from your message. "
+            "Please send a list of drugs, e.g. 'warfarin, aspirin, ibuprofen' "
+            "with patient context like '78 year old male with CKD stage 3'."
         )
         return _jsonrpc_result(
             rpc.id, _build_task(task_id, context_id, "failed", validation_msg)
         )
 
-    # Seed an initial "working" record so anyone polling tasks/get
-    # before the background coroutine starts still gets a valid Task.
     await TASK_STORE.set(task_id, _build_task(task_id, context_id, "working"))
 
-    # Kick off the pipeline as a background task. _run_pipeline_and_store
-    # writes the final state to TASK_STORE itself, so we don't need to
-    # await its return value — only its completion (which we may or may
-    # not see within the blocking budget).
     pipeline_task = asyncio.create_task(
         _run_pipeline_and_store(
             task_id, context_id, medications, patient, pipeline_fhir
         )
     )
 
-    # Try to give blocking-only A2A clients (e.g. those that don't poll
-    # tasks/get) a fully-completed Task in this same response. asyncio
-    # .shield prevents the background task from being cancelled when our
-    # wait_for hits the budget — the pipeline keeps running, and a
-    # subsequent tasks/get will see the eventual completed state.
     try:
         await asyncio.wait_for(
             asyncio.shield(pipeline_task),
@@ -1041,20 +1124,31 @@ async def _handle_message_send(
         )
     except asyncio.TimeoutError:
         logger.info(
-            "A2A: task %s exceeded %ds blocking budget — returning 'working' "
-            "for client to poll tasks/get",
+            "A2A: task %s exceeded %ds blocking budget — returning 'working'",
             task_id, PO_BLOCKING_BUDGET_SECONDS,
         )
 
     final_task = await TASK_STORE.get(task_id)
     if final_task is None:
-        # Defensive: should not happen since we seeded "working" above.
         final_task = _build_task(task_id, context_id, "working")
+
+    # Defensive: never return a completed task with empty artifacts.
+    state = (final_task.get("status") or {}).get("state")
+    if state == "completed" and not final_task.get("artifacts"):
+        logger.error(
+            "A2A: task %s state=completed but artifacts empty — coercing to failed",
+            task_id,
+        )
+        final_task = _build_task(
+            task_id, context_id, "failed",
+            "Analysis completed but produced no artifacts. This is an internal error.",
+        )
+
     return _jsonrpc_result(rpc.id, final_task)
 
 
 async def _handle_tasks_get(rpc: JSONRPCRequest) -> dict[str, Any]:
-    """Handle A2A v1.0 tasks/get — return latest snapshot for a task id."""
+    """Handle A2A v1.0 tasks/get."""
     task_id = (
         rpc.params.get("id")
         or rpc.params.get("taskId")
@@ -1095,7 +1189,9 @@ async def a2a_task_send_legacy(task: A2ATaskRequest, http_request: Request):
                 {
                     "parts": [
                         {
-                            "text": "No medications and no FHIR patient context provided."
+                            "kind": "text",
+                            "type": "text",
+                            "text": "No medications and no FHIR patient context provided.",
                         }
                     ]
                 }
@@ -1108,7 +1204,13 @@ async def a2a_task_send_legacy(task: A2ATaskRequest, http_request: Request):
         return {
             "id": task.id,
             "status": {"state": "completed"},
-            "artifacts": [{"parts": [{"text": markdown}]}],
+            "artifacts": [
+                {
+                    "parts": [
+                        {"kind": "text", "type": "text", "text": markdown}
+                    ]
+                }
+            ],
         }
     except asyncio.TimeoutError:
         return {
@@ -1118,7 +1220,9 @@ async def a2a_task_send_legacy(task: A2ATaskRequest, http_request: Request):
                 {
                     "parts": [
                         {
-                            "text": f"Analysis timed out after {PIPELINE_TIMEOUT_SECONDS}s"
+                            "kind": "text",
+                            "type": "text",
+                            "text": f"Analysis timed out after {PIPELINE_TIMEOUT_SECONDS}s",
                         }
                     ]
                 }
@@ -1129,7 +1233,13 @@ async def a2a_task_send_legacy(task: A2ATaskRequest, http_request: Request):
         return {
             "id": task.id,
             "status": {"state": "failed"},
-            "artifacts": [{"parts": [{"text": f"Analysis failed: {e}"}]}],
+            "artifacts": [
+                {
+                    "parts": [
+                        {"kind": "text", "type": "text", "text": f"Analysis failed: {e}"}
+                    ]
+                }
+            ],
         }
 
 
