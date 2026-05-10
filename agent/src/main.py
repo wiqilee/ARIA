@@ -4,14 +4,12 @@ Implements the A2A v1.0 specification per
 https://a2a-protocol.org/v1.0.0/specification/ and the Po-specific
 migration guide at https://docs.promptopinion.ai/a2a-v1-migration.
 
-Key v1.0 changes from v0.3:
-- Removed `kind` discriminator from Task / Message / Part objects
-  (Appendix A.2.1 of the v1.0 spec)
-- Removed top-level `url` and `preferredTransport` from Agent Card
-- Renamed `additionalInterfaces` -> `supportedInterfaces` (ordered list,
-  most preferred first). Each entry must include `protocolBinding` and
-  `protocolVersion` per Po's deserializer.
-- Removed `capabilities.stateTransitionHistory`
+Defensive serialization: although A2A v1.0 Appendix A.2.1 documents
+the removal of the `kind` discriminator field, real-world v1.0 client
+SDKs (notably Po) still require it for response deserialization to
+distinguish Task from Message. We include `kind` on all polymorphic
+objects (Task, Message, TextPart) so both new and legacy clients can
+parse our responses.
 
 FHIR access context propagation through TWO channels:
 
@@ -410,17 +408,26 @@ def _build_task(
     text: str | None = None,
     artifact_name: str = "aria-analysis",
 ) -> dict[str, Any]:
-    """Build an A2A v1.0 Task object.
+    """Build an A2A Task object.
 
-    Per A2A v1.0 Appendix A.2.1, the `kind` discriminator field is
-    REMOVED from Task / Message / Part objects in v1.0. Including it
-    causes some v1.0 client SDKs (notably Po) to reject the response
-    as not being a Task.
+    Although A2A v1.0 Appendix A.2.1 documents that the `kind`
+    discriminator field is removed, real-world v1.0 client SDKs
+    (Po included) still rely on it for response deserialization.
+    Po returned "did not respond with a task" until we included
+    `kind: "task"`. Each text part also carries `kind: "text"`
+    (and the legacy `type: "text"` alias) so older clients still
+    parse it as a TextPart.
+
+    The Task always includes an empty `history` list — some
+    deserializers consider history a required field even when
+    no prior messages exist.
     """
     task: dict[str, Any] = {
         "id": task_id,
         "contextId": context_id,
+        "kind": "task",
         "status": {"state": state, "timestamp": _now_iso()},
+        "history": [],
     }
     if text:
         task["artifacts"] = [
@@ -429,11 +436,15 @@ def _build_task(
                 "name": artifact_name,
                 "parts": [
                     {
+                        "kind": "text",
+                        "type": "text",
                         "text": text,
                     }
                 ],
             }
         ]
+    else:
+        task["artifacts"] = []
     return task
 
 
@@ -823,7 +834,7 @@ def _build_agent_card() -> dict[str, Any]:
       list, most preferred transport first)
 
     Each AgentInterface entry MUST include `protocolBinding` and
-    `protocolVersion`. Po's deserializer rejects entries that omit
+    `protocolVersion`. Po's deserializer rejected entries that omitted
     these fields with:
       "JSON deserialization for type 'A2A.AgentInterface' was missing
        required properties including: 'protocolBinding', 'protocolVersion'"
@@ -1150,7 +1161,7 @@ async def a2a_task_send_legacy(task: A2ATaskRequest, http_request: Request):
             "id": task.id,
             "status": {"state": "failed"},
             "artifacts": [
-                {"parts": [{"text": "No medications and no FHIR patient context provided."}]}
+                {"parts": [{"kind": "text", "type": "text", "text": "No medications and no FHIR patient context provided."}]}
             ],
         }
 
@@ -1160,14 +1171,14 @@ async def a2a_task_send_legacy(task: A2ATaskRequest, http_request: Request):
         return {
             "id": task.id,
             "status": {"state": "completed"},
-            "artifacts": [{"parts": [{"text": markdown}]}],
+            "artifacts": [{"parts": [{"kind": "text", "type": "text", "text": markdown}]}],
         }
     except asyncio.TimeoutError:
         return {
             "id": task.id,
             "status": {"state": "failed"},
             "artifacts": [
-                {"parts": [{"text": f"Analysis timed out after {PIPELINE_TIMEOUT_SECONDS}s"}]}
+                {"parts": [{"kind": "text", "type": "text", "text": f"Analysis timed out after {PIPELINE_TIMEOUT_SECONDS}s"}]}
             ],
         }
     except Exception as e:
@@ -1175,7 +1186,7 @@ async def a2a_task_send_legacy(task: A2ATaskRequest, http_request: Request):
         return {
             "id": task.id,
             "status": {"state": "failed"},
-            "artifacts": [{"parts": [{"text": f"Analysis failed: {e}"}]}],
+            "artifacts": [{"parts": [{"kind": "text", "type": "text", "text": f"Analysis failed: {e}"}]}],
         }
 
 
