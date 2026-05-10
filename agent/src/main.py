@@ -1,41 +1,24 @@
-"""ARIA A2A Agent: FastAPI entrypoint with A2A v0.3.0 (JSON-RPC 2.0) protocol support.
+"""ARIA A2A Agent: FastAPI entrypoint with A2A v1.0 (JSON-RPC) protocol support.
 
-Implements FHIR access context propagation through TWO channels:
+Implements the A2A v1.0 specification per
+https://a2a-protocol.org/v1.0.0/specification/ and the Po-specific
+migration guide at https://docs.promptopinion.ai/a2a-v1-migration.
+
+Key v1.0 changes from v0.3:
+- Removed `kind` discriminator from Task / Message / Part objects
+  (Appendix A.2.1 of the v1.0 spec)
+- Removed top-level `url` and `preferredTransport` from Agent Card
+- Renamed `additionalInterfaces` -> `supportedInterfaces` (ordered list,
+  most preferred first)
+- Removed `capabilities.stateTransitionHistory`
+
+FHIR access context propagation through TWO channels:
 
 1. A2A Extension payload (Prompt Opinion native, camelCase JSON):
    https://app.promptopinion.ai/schemas/a2a/v1/fhir-context
-   Fields: fhirUrl, fhirToken, fhirRefreshToken, fhirRefreshTokenUrl, patientId
 
-2. SHARP HTTP headers (sharp-on-fhir-mcp compatible):
+2. SHARP HTTP headers:
    X-FHIR-Server-URL, X-FHIR-Access-Token, X-Patient-ID
-
-Both channels resolve to the same internal context, with Channel 1 taking
-precedence when both are present. See docs/sharp-integration.md for the
-full propagation flow and fallback ladder.
-
-A2A v0.3.0 lifecycle (blocking-first):
-
-    POST /a2a/v1 (and /) message/send
-      → server runs the pipeline and waits up to PO_BLOCKING_BUDGET_SECONDS
-        for it to finish.
-        - Finished: returns Task state="completed" with markdown artifact.
-        - Not finished: returns Task state="working" with task_id; client
-          can poll tasks/get to retrieve the eventual completed/failed
-          state. Background coroutine is shielded from cancellation.
-
-    POST /a2a/v1 (and /) tasks/get
-      → returns the latest stored Task snapshot for the given task_id.
-
-The same handler is mounted at BOTH / and /a2a/v1. Some A2A clients
-(notably Prompt Opinion) issue JSON-RPC calls to the URL declared in the
-agent card's top-level `url` field, falling back to the base URL when
-that field is absent. Mounting both paths keeps both clients happy
-without forcing a path choice on the agent card.
-
-Note on protocolVersion: per the official A2A spec at
-https://a2a-protocol.org/v0.3.0/specification/, valid versions are 0.1.0,
-0.2.0 through 0.2.9, and 0.3.0 (current latest). We declare "0.3.0" so
-Po's discovery validator accepts the card.
 """
 
 from __future__ import annotations
@@ -60,7 +43,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from starlette.responses import Response as StarletteResponse
 
-# Ensure src/ is importable
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from mcp_client.client import MCPClient
@@ -82,23 +64,11 @@ PORT = int(os.getenv("PORT", "8000"))
 
 PUBLIC_AGENT_URL = os.getenv("PUBLIC_AGENT_URL", f"http://{HOST}:{PORT}")
 
-# A2A protocol version. The official spec defines 0.1.0, 0.2.x, and 0.3.0.
-# We use 0.3.0 (current latest) so strict clients like Po accept the card.
-A2A_PROTOCOL_VERSION = "0.3.0"
+# A2A v1.0 — current latest stable.
+A2A_PROTOCOL_VERSION = "1.0.0"
 
-# Hard ceiling for pipeline execution. After this, the background coroutine
-# is cancelled and the task transitions to "failed".
 PIPELINE_TIMEOUT_SECONDS = int(os.getenv("PIPELINE_TIMEOUT_SECONDS", "180"))
-
-# Blocking budget: how long message/send will wait synchronously before
-# returning "working". Set near the upper end so simple clients (like Po)
-# always see a fully-completed task. The background coroutine is shielded,
-# so even if this expires the pipeline still finishes — polling clients
-# can retrieve it via tasks/get.
 PO_BLOCKING_BUDGET_SECONDS = int(os.getenv("PO_BLOCKING_BUDGET_SECONDS", "170"))
-
-# Toggle to dump every JSON-RPC request and response body to logs. Useful
-# while debugging client-specific quirks. Set DEBUG_A2A=0 to disable.
 DEBUG_A2A = os.getenv("DEBUG_A2A", "1") == "1"
 
 A2A_SEND_METHODS = frozenset({
@@ -114,12 +84,6 @@ A2A_GET_METHODS = frozenset({
     "getTask",
 })
 
-# Paths on which we serve the JSON-RPC endpoint. We mount both because
-# different clients infer the endpoint from different fields:
-#   - /a2a/v1: declared in supportedInterfaces[0].url, used by clients
-#     that walk supportedInterfaces.
-#   - /:       used by clients (like Po) that POST JSON-RPC to the
-#     top-level `url` field on the agent card or to the base URL.
 A2A_RPC_PATHS = frozenset({"/", "/a2a/v1"})
 
 PO_FHIR_CONTEXT_EXTENSION_URI = (
@@ -199,12 +163,11 @@ app = FastAPI(
 )
 
 
-# ── Debug Middleware (capture A2A I/O on JSON-RPC paths) ────
+# ── Debug Middleware ────────────────────────────────────────
 
 
 @app.middleware("http")
 async def _debug_a2a_io(request: Request, call_next):
-    """Log full request/response bodies for any POST hitting an A2A path."""
     is_a2a = (
         DEBUG_A2A
         and request.method == "POST"
@@ -265,7 +228,7 @@ app.add_middleware(
     ],
 )
 
-# ── Request / Response Models ───────────────────────────────
+# ── Models ──────────────────────────────────────────────────
 
 
 class DrugInput(BaseModel):
@@ -318,9 +281,7 @@ class A2ATaskRequest(BaseModel):
 # ── FHIR Context Extraction ─────────────────────────────────
 
 
-def _extract_fhir_context_from_extension(
-    message: dict[str, Any],
-) -> dict[str, str]:
+def _extract_fhir_context_from_extension(message: dict[str, Any]) -> dict[str, str]:
     extensions = message.get("extensions") or {}
     if not isinstance(extensions, dict):
         return {}
@@ -380,9 +341,7 @@ def _extract_fhir_context(
     extension_ctx = (
         _extract_fhir_context_from_extension(message) if message else {}
     )
-
     merged = {**header_ctx, **extension_ctx}
-
     if merged:
         logger.info(
             "FHIR context resolved: source=%s fhir_url=%s patient_id=%s token=%s refresh=%s",
@@ -392,7 +351,6 @@ def _extract_fhir_context(
             "yes" if "fhir_bearer_token" in merged else "no",
             "yes" if "fhir_refresh_token" in merged else "no",
         )
-
     return merged
 
 
@@ -428,7 +386,8 @@ def _merge_fhir_into_payload(
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+    """ISO 8601 timestamp with Z suffix per A2A v1.0 spec section 5.6.1."""
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _jsonrpc_result(req_id: Any, result: dict[str, Any]) -> dict[str, Any]:
@@ -450,18 +409,17 @@ def _build_task(
     text: str | None = None,
     artifact_name: str = "aria-analysis",
 ) -> dict[str, Any]:
-    """Build an A2A v0.3.0 Task object.
+    """Build an A2A v1.0 Task object.
 
-    Each part declares both `kind` and `type` fields with value "text" —
-    spec uses `kind`, but some clients read `type`. Cheap insurance.
+    Per A2A v1.0 Appendix A.2.1, the `kind` discriminator field is
+    REMOVED from Task / Message / Part objects in v1.0. Including it
+    causes some v1.0 client SDKs (notably Po) to reject the response
+    as not being a Task.
     """
     task: dict[str, Any] = {
         "id": task_id,
         "contextId": context_id,
-        "kind": "task",
         "status": {"state": state, "timestamp": _now_iso()},
-        "artifacts": [],
-        "history": [],
     }
     if text:
         task["artifacts"] = [
@@ -470,8 +428,6 @@ def _build_task(
                 "name": artifact_name,
                 "parts": [
                     {
-                        "kind": "text",
-                        "type": "text",
                         "text": text,
                     }
                 ],
@@ -484,11 +440,6 @@ def _build_task(
 
 
 def _extract_from_natural_language(text: str) -> dict[str, Any]:
-    """Best-effort extractor for chat-style prompts.
-
-    Po sends raw user text rather than JSON. We try to pull medications
-    and patient context out of it.
-    """
     result: dict[str, Any] = {"medications": [], "patient": {}}
 
     med_match = re.search(
@@ -539,7 +490,6 @@ def _parse_message_content(parts: list[dict[str, Any]]) -> dict[str, Any]:
     if not content:
         return {}
 
-    # Strict JSON first
     try:
         data = json.loads(content)
         if isinstance(data, dict) and ("medications" in data or "patient" in data or "fhir" in data):
@@ -547,7 +497,6 @@ def _parse_message_content(parts: list[dict[str, Any]]) -> dict[str, Any]:
     except json.JSONDecodeError:
         pass
 
-    # Natural-language fallback
     extracted = _extract_from_natural_language(content)
     if extracted.get("medications") or extracted.get("patient"):
         logger.info(
@@ -557,7 +506,6 @@ def _parse_message_content(parts: list[dict[str, Any]]) -> dict[str, Any]:
         )
         return extracted
 
-    # Last resort: comma split
     return {"medications": [m.strip() for m in content.split(",") if m.strip() and len(m.strip()) < 60]}
 
 
@@ -624,7 +572,6 @@ def _format_pipeline_result_markdown(
     patient: Any,
     result: dict[str, Any],
 ) -> str:
-    """Convert the ARIA pipeline result into a clinical Markdown report."""
     report = result.get("report") or {}
     graph = result.get("interaction_graph") or {}
     temporal = result.get("temporal_model") or {}
@@ -857,26 +804,24 @@ def _format_pipeline_result_markdown(
     rendered += (
         "\n\n---\n"
         "_Generated by **ARIA** (Adaptive Risk Intelligence for Polypharmacy "
-        "Assessment) via A2A v0.3.0._"
+        "Assessment) via A2A v1.0._"
     )
     return rendered
 
 
-# ── A2A Agent Card Builder ──────────────────────────────────
+# ── A2A v1.0 Agent Card Builder ─────────────────────────────
 
 
 def _build_agent_card() -> dict[str, Any]:
-    """Build the A2A v0.3.0 agent card.
+    """Build the A2A v1.0 agent card per Po migration guide.
 
-    Per the official spec at https://a2a-protocol.org/v0.3.0/specification/,
-    valid protocolVersion values are 0.1.0, 0.2.0..0.2.9, and 0.3.0. We use
-    "0.3.0" so strict clients (like Po) accept the agent during discovery.
-
-    The top-level `url` field is what most A2A clients (including Prompt
-    Opinion) use as the JSON-RPC endpoint — they POST message/send and
-    tasks/get there directly. We point it to /a2a/v1 and also mount the
-    same handler at / to cover clients that fall back to the base URL.
+    Per https://docs.promptopinion.ai/a2a-v1-migration:
+    - Removed: top-level `url`, `preferredTransport`,
+      `capabilities.stateTransitionHistory`
+    - Renamed: `additionalInterfaces` → `supportedInterfaces` (ordered
+      list, most preferred transport first)
     """
+    endpoint = f"{PUBLIC_AGENT_URL}/a2a/v1"
     return {
         "name": "ARIA",
         "description": (
@@ -886,8 +831,6 @@ def _build_agent_card() -> dict[str, Any]:
         ),
         "version": "0.1.0",
         "protocolVersion": A2A_PROTOCOL_VERSION,
-        "url": f"{PUBLIC_AGENT_URL}/a2a/v1",
-        "preferredTransport": "JSONRPC",
         "provider": {
             "organization": "Wiqi Labs",
             "url": "https://github.com/wiqilee/ARIA",
@@ -895,44 +838,20 @@ def _build_agent_card() -> dict[str, Any]:
         "capabilities": {
             "streaming": False,
             "pushNotifications": False,
-            "stateTransitionHistory": False,
-            "experimental": {
-                "fhirContextExtension": {
-                    "supported": True,
+            "extensions": [
+                {
                     "uri": PO_FHIR_CONTEXT_EXTENSION_URI,
+                    "description": "FHIR context allowing the agent to query a FHIR server securely",
                     "required": False,
-                },
-                "sharpExtensions": {
-                    "supported": True,
-                    "headers": [
-                        SHARP_HEADER_FHIR_SERVER_URL,
-                        SHARP_HEADER_ACCESS_TOKEN,
-                        SHARP_HEADER_PATIENT_ID,
-                    ],
-                    "specReference": "https://github.com/TerminallyLazy/sharp-on-fhir-mcp",
-                },
-            },
+                }
+            ],
         },
-        "extensions": [
-            {
-                "uri": PO_FHIR_CONTEXT_EXTENSION_URI,
-                "description": "FHIR context allowing the agent to query a FHIR server securely",
-                "required": False,
-            }
-        ],
         "defaultInputModes": ["text/plain", "application/json"],
         "defaultOutputModes": ["text/plain", "application/json"],
-        "additionalInterfaces": [
-            {
-                "url": f"{PUBLIC_AGENT_URL}/a2a/v1",
-                "transport": "JSONRPC",
-            }
-        ],
         "supportedInterfaces": [
             {
-                "url": f"{PUBLIC_AGENT_URL}/a2a/v1",
-                "protocolBinding": "JSONRPC",
-                "protocolVersion": A2A_PROTOCOL_VERSION,
+                "url": endpoint,
+                "transport": "JSONRPC",
             }
         ],
         "skills": [
@@ -972,7 +891,6 @@ async def _run_pipeline_with_timeout(
     patient: Any,
     fhir_ctx: dict[str, Any],
 ) -> dict[str, Any]:
-    """Run the pipeline with a hard timeout."""
     async def _inner() -> dict[str, Any]:
         try:
             return await run_pipeline(
@@ -991,7 +909,6 @@ async def _run_pipeline_and_store(
     patient: Any,
     fhir_ctx: dict[str, Any],
 ) -> None:
-    """Run the pipeline and store the resulting Task state."""
     try:
         result = await _run_pipeline_with_timeout(medications, patient, fhir_ctx)
         markdown = _format_pipeline_result_markdown(medications, patient, result)
@@ -1066,7 +983,6 @@ async def analyze(request: AnalyzeRequest, http_request: Request):
 
 @app.get("/")
 async def root_get():
-    """Some A2A clients probe the root URL for an agent card. Serve it."""
     return _build_agent_card()
 
 
@@ -1080,12 +996,10 @@ async def agent_card_standard():
     return _build_agent_card()
 
 
-# Both / and /a2a/v1 hit the same JSON-RPC handler. Po POSTs JSON-RPC to
-# the agent card's top-level `url` field; other clients use /a2a/v1.
 @app.post("/")
 @app.post("/a2a/v1")
 async def a2a_jsonrpc(request: Request):
-    """A2A v0.3.0 JSON-RPC 2.0 endpoint."""
+    """A2A v1.0 JSON-RPC endpoint."""
     try:
         raw = await request.json()
     except Exception as e:
@@ -1118,7 +1032,6 @@ async def _handle_message_send(
     rpc: JSONRPCRequest,
     request: Request,
 ) -> dict[str, Any]:
-    """Handle A2A v0.3.0 message/send with blocking-first behavior."""
     message = rpc.params.get("message", {}) or {}
     parts = message.get("parts", []) or []
 
@@ -1190,7 +1103,6 @@ async def _handle_message_send(
 
 
 async def _handle_tasks_get(rpc: JSONRPCRequest) -> dict[str, Any]:
-    """Handle A2A v0.3.0 tasks/get."""
     task_id = (
         rpc.params.get("id")
         or rpc.params.get("taskId")
@@ -1214,7 +1126,6 @@ async def _handle_tasks_get(rpc: JSONRPCRequest) -> dict[str, Any]:
 
 @app.post("/a2a/tasks/send")
 async def a2a_task_send_legacy(task: A2ATaskRequest, http_request: Request):
-    """Legacy A2A task send endpoint. Sync blocking, no async lifecycle."""
     message = task.message if isinstance(task.message, dict) else {}
     parts = message.get("parts", []) if isinstance(message, dict) else []
     fhir_ctx = _extract_fhir_context(http_request, message)
@@ -1228,15 +1139,7 @@ async def a2a_task_send_legacy(task: A2ATaskRequest, http_request: Request):
             "id": task.id,
             "status": {"state": "failed"},
             "artifacts": [
-                {
-                    "parts": [
-                        {
-                            "kind": "text",
-                            "type": "text",
-                            "text": "No medications and no FHIR patient context provided.",
-                        }
-                    ]
-                }
+                {"parts": [{"text": "No medications and no FHIR patient context provided."}]}
             ],
         }
 
@@ -1246,28 +1149,14 @@ async def a2a_task_send_legacy(task: A2ATaskRequest, http_request: Request):
         return {
             "id": task.id,
             "status": {"state": "completed"},
-            "artifacts": [
-                {
-                    "parts": [
-                        {"kind": "text", "type": "text", "text": markdown}
-                    ]
-                }
-            ],
+            "artifacts": [{"parts": [{"text": markdown}]}],
         }
     except asyncio.TimeoutError:
         return {
             "id": task.id,
             "status": {"state": "failed"},
             "artifacts": [
-                {
-                    "parts": [
-                        {
-                            "kind": "text",
-                            "type": "text",
-                            "text": f"Analysis timed out after {PIPELINE_TIMEOUT_SECONDS}s",
-                        }
-                    ]
-                }
+                {"parts": [{"text": f"Analysis timed out after {PIPELINE_TIMEOUT_SECONDS}s"}]}
             ],
         }
     except Exception as e:
@@ -1275,13 +1164,7 @@ async def a2a_task_send_legacy(task: A2ATaskRequest, http_request: Request):
         return {
             "id": task.id,
             "status": {"state": "failed"},
-            "artifacts": [
-                {
-                    "parts": [
-                        {"kind": "text", "type": "text", "text": f"Analysis failed: {e}"}
-                    ]
-                }
-            ],
+            "artifacts": [{"parts": [{"text": f"Analysis failed: {e}"}]}],
         }
 
 
