@@ -86,7 +86,7 @@ The tools built to catch these interactions are static lookup tables with warnin
 
 The result is **alert fatigue**. Clinicians see so many identical, context-free warnings that they override more than 90% of all drug interaction alerts. The tools designed to protect patients have become background noise.
 
-No one has built a system that reasons about risk. So we did.
+No one has built a system that reasons about risk. So I did.
 
 ---
 
