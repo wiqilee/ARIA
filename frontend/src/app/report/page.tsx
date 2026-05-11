@@ -575,6 +575,9 @@ function generateReportHTML(data: AnalyzeResponse, request: AnalyzeRequest | nul
   // ── Section builders ──────────────────────────────────
 
   // Interaction rows: prefer raw_interactions (richer) but fall back to
+  // graph.edges so the PDF is never empty when the demo data is used.
+  const rawIx = data.raw_interactions?.interactions ?? [];
+
   // Decide whether to show the Evidence and Confidence columns in the
   // exported table. If every row would be "—" (because the agent hasn't
   // populated `evidence_grade` and `confidence_score` for any interaction),
@@ -1823,6 +1826,22 @@ export default function ReportPage() {
     age: 50, sex: "unknown", ckd_stage: 0, hepatic_impairment: false,
     smoking: false, alcohol_use: "none", comorbidities: [], allergies: [],
   };
+
+  // Total interactions = pairwise (graph edges) + emergent multi-drug, so
+  // the Patient Summary card matches the "Detected Interactions (N)"
+  // header and the "Interaction Summary" sentence. Previously the card
+  // counted only graph edges, which excluded emergent multi-drug
+  // interactions and produced an inconsistent "4" on the card while the
+  // rest of the page said "7". Use the same priority as the HTML export:
+  // raw_interactions.total_interactions → raw_interactions.interactions
+  // length → effectiveGraph.edges length.
+  const totalInteractions = (() => {
+    const rawList = data.raw_interactions?.interactions ?? [];
+    if (rawList.length > 0) {
+      return data.raw_interactions?.total_interactions ?? rawList.length;
+    }
+    return (effectiveGraph?.edges ?? []).length;
+  })();
 
   const vizTabs = [
     { key: "graph" as const, label: "Interaction Graph", icon: "🕸️", available: !!effectiveGraph },

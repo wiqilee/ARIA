@@ -20,11 +20,12 @@ const HeroBackground = dynamic(
 );
 
 const stats = [
-  // WHO press release confirms the $42B annual medication-error cost
-  // figure. We use the press release rather than a specific WHO publication
-  // ISBN because the ISBN landing page sometimes returns 404 / region
-  // redirects, while the news/item URL is stable and indexed.
-  { value: "$42B", label: "Annual cost of medication errors worldwide", source: "WHO, 2017", url: "https://www.who.int/news/item/29-03-2017-who-launches-global-effort-to-halve-medication-related-errors-in-5-years" },
+  // WHO 2024 publication "Global burden of preventable medication-related
+  // harm in health care: a systematic review" (ISBN 9789240088887, released
+  // May 2024) reports the $42B annual cost of medication-related harm. This
+  // is the same figure WHO has cited since their 2019 medication safety
+  // fact file, now updated in this systematic review.
+  { value: "$42B", label: "Annual cost of medication errors worldwide", source: "WHO, 2024", url: "https://www.who.int/publications/i/item/9789240088887" },
   // Bryant et al. 2014 report a 95.1% drug-drug interaction alert override
   // rate in their Meaningful Use era study — the closest published match
   // for the "90%+ overridden" figure. Previously this pointed to the bare
