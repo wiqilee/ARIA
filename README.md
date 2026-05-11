@@ -13,7 +13,7 @@
 [![Vercel](https://img.shields.io/badge/Deployed_on-Vercel-black?logo=vercel)](https://aria-polypharmacy.vercel.app/)
 [![Prompt Opinion](https://img.shields.io/badge/Prompt_Opinion-View_on_Marketplace-green)](https://app.promptopinion.ai/marketplace/agent/019e07f1-1952-7b07-8a90-4274fdbe8b49)
 
-[![Medium](https://img.shields.io/badge/Read_on-Medium-black?logo=medium)](https://medium.com/@YOUR_MEDIUM_HANDLE)
+[![Medium](https://img.shields.io/badge/Read_on-Medium-black?logo=medium)](https://medium.com/@wiqi_lee/eighteen-warnings-in-fourteen-seconds-why-i-created-aria-ffb06d1a3a13)
 [![X](https://img.shields.io/badge/@wiqi__lee-000000?logo=x)](https://x.com/wiqi_lee)
 [![YouTube](https://img.shields.io/badge/Demo-YouTube-red?logo=youtube)](https://youtube.com/YOUR_DEMO_LINK)
 
@@ -1133,8 +1133,7 @@ This project is licensed under the MIT License. See the [LICENSE](LICENSE) file 
 **Wiqi Lee**, Data Scientist, AI/ML Researcher, Software Engineer
 
 [![X](https://img.shields.io/badge/@wiqi__lee-000000?logo=x)](https://x.com/wiqi_lee)
-[![GitHub](https://img.shields.io/badge/GitHub-wiqilee-181717?logo=github)](https://github.com/wiqilee)
-[![Medium](https://img.shields.io/badge/Medium-Read_Articles-black?logo=medium)](https://medium.com/@YOUR_MEDIUM_HANDLE)
+[![Medium](https://img.shields.io/badge/Medium-Read_Articles-black?logo=medium)](https://medium.com/@wiqi_lee/eighteen-warnings-in-fourteen-seconds-why-i-created-aria-ffb06d1a3a13)
 [![YouTube](https://img.shields.io/badge/Demo_Video-YouTube-red?logo=youtube)](https://youtube.com/YOUR_DEMO_LINK)
 
 ---

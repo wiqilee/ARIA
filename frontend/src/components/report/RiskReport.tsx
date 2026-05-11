@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { InteractionCard } from "./InteractionCard";
 import { DeprescribingStep } from "./DeprescribingStep";
@@ -34,8 +35,64 @@ const BURDEN_EXPLANATIONS: Record<string, Record<string, string>> = {
   },
 };
 
+// Placeholder strings the upstream agent sometimes emits when it defers
+// the real summary to the full report. We treat these as "no summary" so
+// the section is either hidden or filled with a smarter fallback.
+const SUMMARY_PLACEHOLDERS = [
+  "see full report below",
+  "see full report",
+  "see report below",
+  "see below",
+  "n/a",
+  "none",
+  "tbd",
+];
+
+function isPlaceholderSummary(s: string): boolean {
+  const t = s.trim().toLowerCase();
+  if (!t) return true;
+  if (t.length < 30) {
+    // very short text is almost always a placeholder, not a real summary
+    return SUMMARY_PLACEHOLDERS.some((p) => t.includes(p));
+  }
+  return false;
+}
+
+// Build a one-paragraph fallback summary from the structured data we do have,
+// so the Interaction Summary card is always meaningful instead of saying
+// "See full report below".
+function buildFallbackSummary(
+  interactions: any[],
+  criticalFindings: string[],
+): string {
+  if (interactions.length === 0 && criticalFindings.length === 0) return "";
+
+  const sevCount: Record<string, number> = { critical: 0, high: 0, moderate: 0, low: 0 };
+  for (const ix of interactions) {
+    const s = (ix.severity || "").toLowerCase();
+    if (s in sevCount) sevCount[s]++;
+  }
+
+  const parts: string[] = [];
+  parts.push(`${interactions.length} drug-drug interaction${interactions.length === 1 ? "" : "s"} detected`);
+
+  const bits: string[] = [];
+  if (sevCount.critical) bits.push(`${sevCount.critical} critical`);
+  if (sevCount.high) bits.push(`${sevCount.high} high`);
+  if (sevCount.moderate) bits.push(`${sevCount.moderate} moderate`);
+  if (sevCount.low) bits.push(`${sevCount.low} low`);
+  if (bits.length) parts.push(`(${bits.join(", ")})`);
+
+  if (criticalFindings.length) {
+    parts.push(`— ${criticalFindings.length} critical finding${criticalFindings.length === 1 ? "" : "s"} flagged`);
+  }
+
+  return parts.join(" ") + ". See detailed breakdown below.";
+}
+
 export function RiskReport({ data }: RiskReportProps) {
   const { report, deprescribing_plan, raw_interactions } = data;
+  const [showRawReport, setShowRawReport] = useState(false);
 
   if (!report) {
     return (
@@ -59,7 +116,14 @@ export function RiskReport({ data }: RiskReportProps) {
   const evidenceCitations = Array.isArray(report.evidence_citations)
     ? report.evidence_citations
     : [];
-  const interactionSummary = report.interaction_summary || "";
+
+  // Resolve the interaction summary: use the agent's own text when it's
+  // meaningful, otherwise synthesise one from the structured findings.
+  const rawSummary = (report.interaction_summary || "").trim();
+  const interactionSummary = useMemo(() => {
+    if (rawSummary && !isPlaceholderSummary(rawSummary)) return rawSummary;
+    return buildFallbackSummary(interactions, criticalFindings);
+  }, [rawSummary, interactions, criticalFindings]);
 
   return (
     <div className="space-y-5">
@@ -166,7 +230,10 @@ export function RiskReport({ data }: RiskReportProps) {
           >
             Cumulative Burden Scores
           </h3>
-          <div className="grid sm:grid-cols-3 gap-3">
+          {/* `items-stretch` forces every card in the grid to share the row
+              height, so the borders align on top AND bottom regardless of
+              how much copy lives inside each card. */}
+          <div className="grid sm:grid-cols-3 gap-3 items-stretch">
             {burdenScores.anticholinergic_burden && (
               <BurdenCard
                 label="Anticholinergic"
@@ -360,19 +427,44 @@ export function RiskReport({ data }: RiskReportProps) {
                 <DeprescribingStep key={i} step={step} index={i} />
               ))}
             </div>
+
+            {/* Total expected risk reduction — promoted from a floating
+                line into a proper banner card so it visually anchors the
+                deprescribing plan. */}
             <div
-              className="mt-4 text-center text-sm font-bold"
+              className="mt-4 p-4 rounded-lg flex items-center justify-between gap-4"
               style={{
-                fontFamily: "var(--font-mono)",
-                color: "var(--success)",
+                background: "rgba(0, 230, 118, 0.06)",
+                border: "1px solid rgba(0, 230, 118, 0.18)",
+                transition: "all 0.3s ease",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.borderColor = "rgba(0, 230, 118, 0.35)";
+                e.currentTarget.style.boxShadow = "0 0 18px rgba(0, 230, 118, 0.1)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.borderColor = "rgba(0, 230, 118, 0.18)";
+                e.currentTarget.style.boxShadow = "none";
               }}
             >
-              Total expected risk reduction:{" "}
-              {(
-                deprescribing_plan.total_expected_risk_reduction || 0
-              ).toFixed(0)}
-              %
+              <div
+                className="text-[11px] uppercase tracking-wider"
+                style={{ color: "#7a8ba8", fontFamily: "var(--font-mono)" }}
+              >
+                Total expected risk reduction
+              </div>
+              <div
+                className="text-2xl font-bold font-mono"
+                style={{ color: "var(--success)" }}
+              >
+                −
+                {(
+                  deprescribing_plan.total_expected_risk_reduction || 0
+                ).toFixed(0)}
+                %
+              </div>
             </div>
+
             {deprescribing_plan.warnings &&
               deprescribing_plan.warnings.length > 0 && (
                 <div className="mt-3 space-y-1">
@@ -463,7 +555,9 @@ export function RiskReport({ data }: RiskReportProps) {
         </motion.section>
       )}
 
-      {/* Full Report Text */}
+      {/* Full Report Text — now collapsible.
+          The agent often returns a pretty-printed JSON dump here, which is
+          informative for debugging but ugly inline. Hidden by default. */}
       {report.report_text && (
         <motion.section
           initial={{ opacity: 0, y: 20 }}
@@ -481,18 +575,64 @@ export function RiskReport({ data }: RiskReportProps) {
           }}
           style={{ transition: "all 0.4s cubic-bezier(0.22, 1, 0.36, 1)" }}
         >
-          <h3
-            className="font-display font-semibold text-xs uppercase tracking-wider mb-3"
-            style={{ color: "#8a9bba" }}
-          >
-            Full Report
-          </h3>
-          <p
-            className="text-sm leading-relaxed whitespace-pre-wrap"
-            style={{ color: "#d0daea" }}
-          >
-            {report.report_text}
-          </p>
+          <div className="flex items-center justify-between mb-3">
+            <h3
+              className="font-display font-semibold text-xs uppercase tracking-wider"
+              style={{ color: "#8a9bba" }}
+            >
+              Full Report
+            </h3>
+            <button
+              type="button"
+              onClick={() => setShowRawReport((v) => !v)}
+              className="text-[11px] px-2.5 py-1 rounded transition-all duration-200"
+              style={{
+                fontFamily: "var(--font-mono)",
+                color: "var(--primary)",
+                background: "var(--primary-dim)",
+                border: "1px solid rgba(0, 229, 255, 0.18)",
+                cursor: "pointer",
+                letterSpacing: "1px",
+                textTransform: "uppercase",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.borderColor = "rgba(0, 229, 255, 0.4)";
+                e.currentTarget.style.boxShadow = "0 0 12px rgba(0, 229, 255, 0.15)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.borderColor = "rgba(0, 229, 255, 0.18)";
+                e.currentTarget.style.boxShadow = "none";
+              }}
+              aria-expanded={showRawReport}
+            >
+              {showRawReport ? "▾ Hide raw" : "▸ Show raw"}
+            </button>
+          </div>
+
+          {!showRawReport && (
+            <p
+              className="text-xs leading-relaxed"
+              style={{ color: "#7a8ba8" }}
+            >
+              Raw report payload from the agent ({report.report_text.length.toLocaleString()} characters). Hidden by default for readability — expand to inspect.
+            </p>
+          )}
+
+          {showRawReport && (
+            <pre
+              className="text-[11px] leading-relaxed whitespace-pre-wrap overflow-x-auto rounded-md p-3"
+              style={{
+                color: "#c4d0e4",
+                background: "rgba(3, 11, 26, 0.6)",
+                border: "1px solid rgba(0, 229, 255, 0.07)",
+                fontFamily: "var(--font-mono)",
+                maxHeight: "480px",
+                overflowY: "auto",
+              }}
+            >
+              {report.report_text}
+            </pre>
+          )}
         </motion.section>
       )}
 
@@ -530,8 +670,11 @@ function BurdenCard({
   const contributors = Array.isArray(detail?.per_drug) ? detail.per_drug : [];
 
   return (
+    // `h-full flex flex-col` lets the card fill the grid row height the
+    // parent enforces with `items-stretch`. The contributor list is pinned
+    // to the bottom with `mt-auto` so all three cards share the same baseline.
     <div
-      className="p-4 rounded-lg"
+      className="p-4 rounded-lg h-full flex flex-col"
       style={{
         background: "rgba(3, 11, 26, 0.5)",
         border: `1px solid ${riskLevel === "high" || riskLevel === "critical" ? "rgba(255, 23, 68, 0.15)" : "var(--border)"}`,
@@ -589,9 +732,9 @@ function BurdenCard({
       >
         {interpretation}
       </p>
-      {/* Top contributors */}
+      {/* Top contributors — pinned to the bottom so cards align */}
       {contributors.length > 0 && (
-        <div className="mt-2 space-y-0.5">
+        <div className="mt-auto pt-2 space-y-0.5">
           {contributors.slice(0, 3).map((c: any, i: number) => (
             <div
               key={i}
