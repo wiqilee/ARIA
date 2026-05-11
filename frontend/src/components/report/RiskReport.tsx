@@ -233,9 +233,29 @@ export function RiskReport({ data }: RiskReportProps) {
         </SectionCard>
       )}
 
-      {/* Cumulative Burden Scores */}
-      {burdenScores && (
-        <SectionCard accentColor={SECTION_ACCENT.burden} delay={0.2}>
+      {/* Cumulative Burden Scores — shown only when the scoring pipeline
+          actually ran. When the Rust MCP server's burden_scores tool fails
+          to parse Gemini's response, its field-level fallback emits buckets
+          tagged with risk_level "unknown" (per the defensive parser).
+          Treat any "unknown" bucket as a parser failure signal and hide
+          the whole card — three "0.0 LOW" tiles in a row look like a bug
+          even though they would be clinically valid for a regimen with no
+          anticholinergic / sedating / QT-prolonging agents. A truly
+          all-low patient still renders here (their risk_levels will be
+          "low", not "unknown"). */}
+      {(() => {
+        if (!burdenScores) return null;
+        const buckets = [
+          burdenScores.anticholinergic_burden,
+          burdenScores.sedation_load,
+          burdenScores.qt_prolongation_risk,
+        ].filter(Boolean);
+        const parserFailed = buckets.some(
+          (b) => (b as { risk_level?: string })?.risk_level === "unknown",
+        );
+        if (parserFailed || buckets.length === 0) return null;
+        return (
+          <SectionCard accentColor={SECTION_ACCENT.burden} delay={0.2}>
           <h3
             className="font-display font-semibold text-xs uppercase tracking-wider mb-4"
             style={{ color: SECTION_ACCENT.burden }}
@@ -277,7 +297,8 @@ export function RiskReport({ data }: RiskReportProps) {
             </p>
           )}
         </SectionCard>
-      )}
+        );
+      })()}
 
       {/* Detected Interactions */}
       {interactions.length > 0 && (
