@@ -303,26 +303,59 @@ export default function AboutPage() {
         {/* ── The Problem ── */}
         <RevealSection className="mb-24">
           <GlowCard accentColor="#ef4444">
-            <div className="flex items-start gap-3 mb-4">
+            <div className="flex items-start gap-3 mb-5">
               <span className="text-3xl">🚨</span>
               <div>
                 <h2 className="font-display font-bold text-2xl text-gradient mb-2">
                   The Problem Nobody Has Solved
                 </h2>
-                <p className="text-text-muted text-xs uppercase tracking-wider">
+                <p
+                  className="text-xs uppercase tracking-[0.2em] font-semibold"
+                  style={{ color: "#f87171" }}
+                >
                   A $42 billion global crisis
                 </p>
               </div>
             </div>
-            <div className="space-y-4 text-text-secondary text-sm leading-relaxed">
+
+            {/* Stat pills — visual anchors that make the numbers impossible
+                to skim past. Each pill calls out one striking figure. */}
+            <div className="grid grid-cols-3 gap-3 mb-6">
+              <StatPill value="$42B" label="annual cost" color="#ef4444" />
+              <StatPill value="59%" label="of frail elderly" color="#f59e0b" />
+              <StatPill value="90%+" label="alerts overridden" color="#ef4444" />
+            </div>
+
+            <div
+              className="space-y-4 text-[15px] leading-relaxed"
+              style={{ color: "#d0daea" }}
+            >
               <p>
-                Medication errors cost the world an estimated <span style={{ color: "#ef4444", fontWeight: 700 }}>$42 billion USD every year</span> — nearly 1% of total global health expenditure. Half of all preventable harm in medical care is medication-related.
+                Medication errors cost the world an estimated{" "}
+                <span style={{ color: "#ef4444", fontWeight: 700 }}>
+                  $42 billion USD every year
+                </span>
+                . That is nearly 1% of total global health expenditure. Half of
+                all preventable harm in medical care is medication-related.
               </p>
               <p>
-                The driver is <span style={{ color: "#f59e0b", fontWeight: 600 }}>polypharmacy</span>: the simultaneous use of 5+ medications. Global prevalence is 37% in the general population, rising to 52% among inpatients and 59% among frail elderly.
+                The driver is{" "}
+                <span style={{ color: "#f59e0b", fontWeight: 700 }}>
+                  polypharmacy
+                </span>
+                : the simultaneous use of five or more medications. Global
+                prevalence sits at 37% in the general population. It climbs to
+                52% among inpatients and 59% among frail elderly patients.
               </p>
               <p>
-                Existing tools are static lookup tables with identical, context-free warnings. The result? Clinicians override <span style={{ color: "#ef4444", fontWeight: 700 }}>more than 90% of all drug interaction alerts</span>. The tools designed to protect patients have become background noise.
+                Existing tools are static lookup tables. They emit identical,
+                context-free warnings for every patient. The result is
+                predictable: clinicians override{" "}
+                <span style={{ color: "#ef4444", fontWeight: 700 }}>
+                  more than 90% of all drug interaction alerts
+                </span>
+                . The tools designed to protect patients have become background
+                noise.
               </p>
             </div>
           </GlowCard>
@@ -352,7 +385,7 @@ export default function AboutPage() {
               <FeatureItem
                 icon="⏱️"
                 title="Temporal Cascade Modeling"
-                description="Models when an interaction peaks — not just whether it exists. Predicts critical intervention windows."
+                description="Models when an interaction peaks, not just whether it exists. Predicts critical intervention windows."
                 color="#8b5cf6"
               />
             </RevealSection>
@@ -387,10 +420,10 @@ export default function AboutPage() {
                 { n: "Temporal Cascade Modeling", d: "Predicts when risk peaks over time" },
                 { n: "Pharmacokinetic Reasoning", d: "CYP enzyme, renal, microbiome pathways via Gemini 2.5 Pro" },
                 { n: "Patient Phenotype Multiplier", d: "Same drugs, different patients, different risk scores" },
-                { n: "N-Drug Graph + Hub ID", d: "Beyond pairwise — finds the one drug causing 60% of conflicts" },
+                { n: "N-Drug Graph + Hub ID", d: "Beyond pairwise. Finds the one drug causing 60% of conflicts." },
                 { n: "Evidence Grading", d: "A–D grades with confidence scores and PubMed citations" },
-                { n: "Cumulative Burden Scores", d: "Anticholinergic, sedation, QT — validated clinical metrics" },
-                { n: "Deprescribing Optimizer", d: "Not a warning — a plan with substitutes and timelines" },
+                { n: "Cumulative Burden Scores", d: "Anticholinergic, sedation, QT. Validated clinical metrics." },
+                { n: "Deprescribing Optimizer", d: "Not a warning. A plan with substitutes and timelines." },
                 { n: "Integrated Pipeline", d: "All 8 capabilities orchestrated into one coherent report" },
               ].map((item, i) => (
                 <HoverRow key={i} title={item.n} description={item.d} index={i} />
@@ -413,7 +446,7 @@ export default function AboutPage() {
               <StepCard
                 number={1}
                 title="Enter Medications"
-                description="Input the patient's medication list and clinical context — age, CKD stage, hepatic function, comorbidities."
+                description="Input the patient's medication list and clinical context: age, CKD stage, hepatic function, comorbidities."
                 color="#06b6d4"
               />
             </RevealSection>
@@ -463,28 +496,116 @@ export default function AboutPage() {
             <h2 className="font-display font-bold text-3xl text-gradient mb-3">
               Built By
             </h2>
+            <p style={{ color: "#94a8c8" }} className="text-sm">
+              One engineer. Three weeks. Eight clinical capabilities.
+            </p>
           </div>
 
           <div className="max-w-md mx-auto">
             <GlowCard accentColor="#06b6d4" className="text-center">
-              {/* Avatar placeholder */}
+              {/* Solo-builder badge */}
               <div
-                className="w-20 h-20 rounded-full mx-auto mb-4 flex items-center justify-center"
+                className="inline-block px-3 py-1 rounded-full text-[10px] uppercase mb-5"
                 style={{
-                  background: "linear-gradient(135deg, #06b6d4, #8b5cf6)",
-                  boxShadow: "0 0 30px rgba(6, 182, 212, 0.2)",
+                  border: "1px solid rgba(139, 92, 246, 0.35)",
+                  color: "#a78bfa",
+                  background: "rgba(139, 92, 246, 0.08)",
+                  letterSpacing: "0.18em",
+                  fontFamily: "var(--font-mono, ui-monospace)",
                 }}
               >
-                <span className="text-3xl font-display font-black text-white">W</span>
+                Solo Builder · Hackathon Submission
               </div>
-              <h3 className="font-display font-bold text-xl text-white mb-1">Wiqi Lee</h3>
-              <p className="text-text-muted text-xs mb-5">
+
+              {/* Avatar with multi-ring glow */}
+              <div className="relative w-24 h-24 mx-auto mb-5">
+                {/* Outer ring (slow rotation feel via shadow only) */}
+                <div
+                  className="absolute inset-0 rounded-full"
+                  style={{
+                    background: "linear-gradient(135deg, #06b6d4, #8b5cf6)",
+                    filter: "blur(10px)",
+                    opacity: 0.4,
+                  }}
+                />
+                {/* Inner avatar */}
+                <div
+                  className="relative w-24 h-24 rounded-full flex items-center justify-center"
+                  style={{
+                    background: "linear-gradient(135deg, #06b6d4, #8b5cf6)",
+                    boxShadow:
+                      "0 0 40px rgba(6, 182, 212, 0.35), inset 0 0 20px rgba(255, 255, 255, 0.12)",
+                  }}
+                >
+                  <span className="text-4xl font-display font-black text-white drop-shadow-md">
+                    W
+                  </span>
+                </div>
+              </div>
+
+              {/* Name */}
+              <h3
+                className="font-display font-bold text-2xl mb-1"
+                style={{
+                  color: "#f1f5f9",
+                  letterSpacing: "-0.01em",
+                }}
+              >
+                Wiqi Lee
+              </h3>
+
+              {/* Title roles, separated cleanly */}
+              <p
+                className="text-[11px] uppercase mb-5"
+                style={{
+                  color: "#94a8c8",
+                  letterSpacing: "0.18em",
+                  fontFamily: "var(--font-mono, ui-monospace)",
+                }}
+              >
                 Data Scientist · AI/ML Researcher · Software Engineer
               </p>
 
-              <div className="flex flex-col gap-2">
-                <SocialLink href="https://twitter.com/wiqi_lee" label="@wiqi_lee" icon="𝕏" />
-                <SocialLink href="https://github.com/wiqilee/ARIA" label="github.com/wiqilee/ARIA" icon="🐙" />
+              {/* Divider with accent dot */}
+              <div className="flex items-center justify-center gap-2 mb-5">
+                <span
+                  className="h-px flex-1"
+                  style={{
+                    background:
+                      "linear-gradient(90deg, transparent, rgba(6, 182, 212, 0.35), transparent)",
+                  }}
+                />
+                <span style={{ color: "#06b6d4", fontSize: "0.5rem" }}>◆</span>
+                <span
+                  className="h-px flex-1"
+                  style={{
+                    background:
+                      "linear-gradient(90deg, transparent, rgba(139, 92, 246, 0.35), transparent)",
+                  }}
+                />
+              </div>
+
+              {/* Quote / mission statement */}
+              <p
+                className="text-sm leading-relaxed italic mb-6"
+                style={{ color: "#c4d0e4" }}
+              >
+                &ldquo;An agent that thinks like a clinical pharmacologist,
+                not a database lookup.&rdquo;
+              </p>
+
+              {/* Social links as premium pills */}
+              <div className="flex flex-col sm:flex-row gap-2.5 justify-center">
+                <SocialLink
+                  href="https://twitter.com/wiqi_lee"
+                  label="@wiqi_lee"
+                  icon="𝕏"
+                />
+                <SocialLink
+                  href="https://github.com/wiqilee/ARIA"
+                  label="github.com/wiqilee/ARIA"
+                  icon="⌥"
+                />
               </div>
             </GlowCard>
           </div>
@@ -571,6 +692,56 @@ function TechItem({ label, value, color }: { label: string; value: string; color
         style={{ color: hovered ? color : "#f1f5f9" }}
       >
         {value}
+      </div>
+    </div>
+  );
+}
+
+/* Bold statistic shown in The Problem section.
+   The visual job is to make the figures unmissable, so each pill is
+   a self-contained block: oversized number, supporting label, accent
+   border in the severity colour of the statistic. */
+function StatPill({
+  value,
+  label,
+  color,
+}: {
+  value: string;
+  label: string;
+  color: string;
+}) {
+  const [hovered, setHovered] = useState(false);
+  return (
+    <div
+      className="rounded-lg p-3 text-center transition-all duration-300"
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        background: hovered ? `${color}14` : `${color}08`,
+        border: `1px solid ${hovered ? color + "66" : color + "33"}`,
+        boxShadow: hovered ? `0 0 18px ${color}22` : "none",
+        transform: hovered ? "translateY(-1px)" : "translateY(0)",
+      }}
+    >
+      <div
+        className="font-display font-black text-2xl sm:text-3xl"
+        style={{
+          color,
+          letterSpacing: "-0.02em",
+          textShadow: `0 0 12px ${color}55`,
+        }}
+      >
+        {value}
+      </div>
+      <div
+        className="text-[10px] uppercase mt-1"
+        style={{
+          color: "#94a8c8",
+          letterSpacing: "0.14em",
+          fontFamily: "var(--font-mono, ui-monospace)",
+        }}
+      >
+        {label}
       </div>
     </div>
   );

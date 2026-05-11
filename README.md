@@ -8,7 +8,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/Rust-MCP_Server-orange?logo=rust)](https://www.rust-lang.org/)
 [![Python](https://img.shields.io/badge/Python-Agent_Layer-blue?logo=python)](https://www.python.org/)
-[![Google Cloud Run](https://img.shields.io/badge/Google_Cloud-Run_asia--southeast2-4285F4?logo=googlecloud)](https://cloud.google.com/run)
+[![Google Cloud Run](https://img.shields.io/badge/Google_Cloud-Run_asia--southeast2-4285F4?logo=googlecloud)](https://aria-a2a-agent-233281205053.asia-southeast2.run.app/health)
 [![Gemini](https://img.shields.io/badge/Gemini-2.5_Pro-8E75B2?logo=googlegemini)](https://deepmind.google/technologies/gemini/)
 [![Vercel](https://img.shields.io/badge/Deployed_on-Vercel-black?logo=vercel)](https://aria-polypharmacy.vercel.app/)
 [![Prompt Opinion](https://img.shields.io/badge/Prompt_Opinion-View_on_Marketplace-green)](https://app.promptopinion.ai/marketplace/agent/019e07f1-1952-7b07-8a90-4274fdbe8b49)

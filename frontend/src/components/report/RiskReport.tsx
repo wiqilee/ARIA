@@ -20,20 +20,36 @@ const BURDEN_LEVEL_COLORS: Record<string, string> = {
 const BURDEN_EXPLANATIONS: Record<string, Record<string, string>> = {
   anticholinergic: {
     low: "Minimal anticholinergic effects expected.",
-    moderate: "May cause dry mouth, constipation, or mild confusion — monitor cognitive function.",
-    high: "Significant anticholinergic load — risk of delirium, falls, and cognitive decline. Deprescribing review strongly recommended.",
+    moderate: "May cause dry mouth, constipation, or mild confusion. Monitor cognitive function.",
+    high: "Significant anticholinergic load. Risk of delirium, falls, and cognitive decline. Deprescribing review strongly recommended.",
   },
   sedation: {
     low: "Low sedation risk with current regimen.",
-    moderate: "Additive sedation possible — caution with driving and operating machinery.",
-    high: "High sedation load — significant fall risk and respiratory depression concern, especially in elderly patients.",
+    moderate: "Additive sedation possible. Caution with driving and operating machinery.",
+    high: "High sedation load. Significant fall risk and respiratory depression concern, especially in elderly patients.",
   },
   qt: {
     low: "Low QT prolongation risk.",
-    moderate: "Moderate QT risk — consider baseline ECG and electrolyte monitoring.",
-    high: "Significant QT prolongation risk — ECG monitoring required. Avoid additional QT-prolonging agents.",
+    moderate: "Moderate QT risk. Consider baseline ECG and electrolyte monitoring.",
+    high: "Significant QT prolongation risk. ECG monitoring required. Avoid additional QT-prolonging agents.",
   },
 };
+
+// Section accent colours. Each section now has a distinct identity so the
+// user can tell at a glance which block they're looking at, and the borders
+// no longer all look identical (the original complaint). Colours follow
+// severity convention loosely: red = critical, cyan = informational summary,
+// purple = analytical (burden), orange = detected (action needed), green =
+// prescriptive (deprescribing), slate = debug/raw.
+const SECTION_ACCENT = {
+  critical: "#ef4444",
+  summary: "#06b6d4",
+  burden: "#8b5cf6",
+  interactions: "#f59e0b",
+  deprescribing: "#10b981",
+  citations: "#06b6d4",
+  raw: "#64748b",
+} as const;
 
 // Placeholder strings the upstream agent sometimes emits when it defers
 // the real summary to the full report. We treat these as "no summary" so
@@ -52,15 +68,14 @@ function isPlaceholderSummary(s: string): boolean {
   const t = s.trim().toLowerCase();
   if (!t) return true;
   if (t.length < 30) {
-    // very short text is almost always a placeholder, not a real summary
     return SUMMARY_PLACEHOLDERS.some((p) => t.includes(p));
   }
   return false;
 }
 
-// Build a one-paragraph fallback summary from the structured data we do have,
-// so the Interaction Summary card is always meaningful instead of saying
-// "See full report below".
+// Build a one-paragraph fallback summary from the structured data we do
+// have, so the Interaction Summary card is always meaningful instead of
+// saying "See full report below".
 function buildFallbackSummary(
   interactions: any[],
   criticalFindings: string[],
@@ -74,7 +89,9 @@ function buildFallbackSummary(
   }
 
   const parts: string[] = [];
-  parts.push(`${interactions.length} drug-drug interaction${interactions.length === 1 ? "" : "s"} detected`);
+  parts.push(
+    `${interactions.length} drug-drug interaction${interactions.length === 1 ? "" : "s"} detected`,
+  );
 
   const bits: string[] = [];
   if (sevCount.critical) bits.push(`${sevCount.critical} critical`);
@@ -84,10 +101,55 @@ function buildFallbackSummary(
   if (bits.length) parts.push(`(${bits.join(", ")})`);
 
   if (criticalFindings.length) {
-    parts.push(`— ${criticalFindings.length} critical finding${criticalFindings.length === 1 ? "" : "s"} flagged`);
+    parts.push(
+      `. ${criticalFindings.length} critical finding${criticalFindings.length === 1 ? "" : "s"} flagged`,
+    );
   }
 
-  return parts.join(" ") + ". See detailed breakdown below.";
+  return parts.join(" ") + ". See the detailed breakdown below.";
+}
+
+// ─── Section card with accent-coloured border ────────────────
+// All right-column sections share this wrapper so the visual rhythm is
+// consistent. Each section passes its own `accentColor` so its border is
+// visually distinct from the others. Hover lifts the card and intensifies
+// the border, mirroring the HoverCard pattern used by the parent page.
+function SectionCard({
+  accentColor,
+  delay = 0,
+  children,
+}: {
+  accentColor: string;
+  delay?: number;
+  children: React.ReactNode;
+}) {
+  return (
+    <motion.section
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay }}
+      className="rounded-xl p-5"
+      style={{
+        background: "rgba(8, 20, 37, 0.6)",
+        border: `1px solid ${accentColor}33`,
+        transition: "all 0.4s cubic-bezier(0.22, 1, 0.36, 1)",
+      }}
+      onMouseEnter={(e) => {
+        const el = e.currentTarget;
+        el.style.borderColor = `${accentColor}66`;
+        el.style.boxShadow = `0 0 24px ${accentColor}1c, 0 0 8px ${accentColor}10`;
+        el.style.transform = "translateY(-2px)";
+      }}
+      onMouseLeave={(e) => {
+        const el = e.currentTarget;
+        el.style.borderColor = `${accentColor}33`;
+        el.style.boxShadow = "none";
+        el.style.transform = "translateY(0)";
+      }}
+    >
+      {children}
+    </motion.section>
+  );
 }
 
 export function RiskReport({ data }: RiskReportProps) {
@@ -96,10 +158,7 @@ export function RiskReport({ data }: RiskReportProps) {
 
   if (!report) {
     return (
-      <div
-        className="text-center py-16"
-        style={{ color: "#6b7f9e" }}
-      >
+      <div className="text-center py-16" style={{ color: "#6b7f9e" }}>
         No report data available.
       </div>
     );
@@ -129,28 +188,10 @@ export function RiskReport({ data }: RiskReportProps) {
     <div className="space-y-5">
       {/* Critical Findings */}
       {criticalFindings.length > 0 && (
-        <motion.section
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.1 }}
-          className="rounded-xl p-5"
-          style={{
-            background: "rgba(255, 23, 68, 0.04)",
-            border: "1px solid rgba(255, 23, 68, 0.15)",
-            transition: "all 0.4s ease",
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.borderColor = "rgba(255, 23, 68, 0.3)";
-            e.currentTarget.style.boxShadow = "0 0 20px rgba(255, 23, 68, 0.08)";
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.borderColor = "rgba(255, 23, 68, 0.15)";
-            e.currentTarget.style.boxShadow = "none";
-          }}
-        >
+        <SectionCard accentColor={SECTION_ACCENT.critical} delay={0.1}>
           <h3
             className="font-display font-semibold text-xs uppercase tracking-wider mb-3"
-            style={{ color: "var(--danger)" }}
+            style={{ color: SECTION_ACCENT.critical }}
           >
             ⚠ Critical Findings ({criticalFindings.length})
           </h3>
@@ -161,38 +202,25 @@ export function RiskReport({ data }: RiskReportProps) {
                 className="text-sm flex gap-2 leading-relaxed"
                 style={{ color: "#d0daea" }}
               >
-                <span style={{ color: "var(--danger)" }} className="shrink-0 mt-0.5">
+                <span
+                  style={{ color: SECTION_ACCENT.critical }}
+                  className="shrink-0 mt-0.5"
+                >
                   ●
                 </span>
                 {f}
               </div>
             ))}
           </div>
-        </motion.section>
+        </SectionCard>
       )}
 
       {/* Interaction Summary */}
       {interactionSummary && (
-        <motion.section
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.15 }}
-          className="glass-panel p-5"
-          onMouseEnter={(e) => {
-            e.currentTarget.style.borderColor = "rgba(0, 229, 255, 0.22)";
-            e.currentTarget.style.boxShadow = "0 0 20px rgba(0, 229, 255, 0.08)";
-            e.currentTarget.style.transform = "translateY(-1px)";
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.borderColor = "rgba(0, 229, 255, 0.07)";
-            e.currentTarget.style.boxShadow = "none";
-            e.currentTarget.style.transform = "translateY(0)";
-          }}
-          style={{ transition: "all 0.4s cubic-bezier(0.22, 1, 0.36, 1)" }}
-        >
+        <SectionCard accentColor={SECTION_ACCENT.summary} delay={0.15}>
           <h3
             className="font-display font-semibold text-xs uppercase tracking-wider mb-2"
-            style={{ color: "#8a9bba" }}
+            style={{ color: SECTION_ACCENT.summary }}
           >
             Interaction Summary
           </h3>
@@ -202,37 +230,21 @@ export function RiskReport({ data }: RiskReportProps) {
           >
             {interactionSummary}
           </p>
-        </motion.section>
+        </SectionCard>
       )}
 
       {/* Cumulative Burden Scores */}
       {burdenScores && (
-        <motion.section
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.2 }}
-          className="glass-panel p-5"
-          onMouseEnter={(e) => {
-            e.currentTarget.style.borderColor = "rgba(0, 229, 255, 0.22)";
-            e.currentTarget.style.boxShadow = "0 0 20px rgba(0, 229, 255, 0.08)";
-            e.currentTarget.style.transform = "translateY(-1px)";
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.borderColor = "rgba(0, 229, 255, 0.07)";
-            e.currentTarget.style.boxShadow = "none";
-            e.currentTarget.style.transform = "translateY(0)";
-          }}
-          style={{ transition: "all 0.4s cubic-bezier(0.22, 1, 0.36, 1)" }}
-        >
+        <SectionCard accentColor={SECTION_ACCENT.burden} delay={0.2}>
           <h3
             className="font-display font-semibold text-xs uppercase tracking-wider mb-4"
-            style={{ color: "#8a9bba" }}
+            style={{ color: SECTION_ACCENT.burden }}
           >
             Cumulative Burden Scores
           </h3>
           {/* `items-stretch` forces every card in the grid to share the row
-              height, so the borders align on top AND bottom regardless of
-              how much copy lives inside each card. */}
+              height, so the borders align top AND bottom regardless of how
+              much copy lives inside each card. */}
           <div className="grid sm:grid-cols-3 gap-3 items-stretch">
             {burdenScores.anticholinergic_burden && (
               <BurdenCard
@@ -264,15 +276,15 @@ export function RiskReport({ data }: RiskReportProps) {
               {burdenScores.total_burden_summary}
             </p>
           )}
-        </motion.section>
+        </SectionCard>
       )}
 
       {/* Detected Interactions */}
       {interactions.length > 0 && (
-        <section>
+        <SectionCard accentColor={SECTION_ACCENT.interactions} delay={0.25}>
           <h3
             className="font-display font-semibold text-xs uppercase tracking-wider mb-4"
-            style={{ color: "#8a9bba" }}
+            style={{ color: SECTION_ACCENT.interactions }}
           >
             Detected Interactions ({interactions.length})
           </h3>
@@ -288,30 +300,16 @@ export function RiskReport({ data }: RiskReportProps) {
               />
             ))}
           </div>
-        </section>
+        </SectionCard>
       )}
 
-      {/* Per-Interaction Risk Scores */}
+      {/* Per-Interaction Risk Scores — fallback when there are no full
+          Interaction objects (e.g. agent only returned scores). */}
       {riskScores.length > 0 && interactions.length === 0 && (
-        <motion.section
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="glass-panel p-5"
-          onMouseEnter={(e) => {
-            e.currentTarget.style.borderColor = "rgba(0, 229, 255, 0.22)";
-            e.currentTarget.style.boxShadow = "0 0 20px rgba(0, 229, 255, 0.08)";
-            e.currentTarget.style.transform = "translateY(-1px)";
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.borderColor = "rgba(0, 229, 255, 0.07)";
-            e.currentTarget.style.boxShadow = "none";
-            e.currentTarget.style.transform = "translateY(0)";
-          }}
-          style={{ transition: "all 0.4s cubic-bezier(0.22, 1, 0.36, 1)" }}
-        >
+        <SectionCard accentColor={SECTION_ACCENT.interactions} delay={0.25}>
           <h3
             className="font-display font-semibold text-xs uppercase tracking-wider mb-3"
-            style={{ color: "#8a9bba" }}
+            style={{ color: SECTION_ACCENT.interactions }}
           >
             Risk Scores
           </h3>
@@ -355,10 +353,7 @@ export function RiskReport({ data }: RiskReportProps) {
                     >
                       {rs.adjusted_score?.toFixed(1) ?? "—"}
                     </span>
-                    <span
-                      className="text-[10px]"
-                      style={{ color: "#6b7f9e" }}
-                    >
+                    <span className="text-[10px]" style={{ color: "#6b7f9e" }}>
                       /10
                     </span>
                   </div>
@@ -383,7 +378,10 @@ export function RiskReport({ data }: RiskReportProps) {
                         key={j}
                         className="text-[10px] px-1.5 py-0.5 rounded"
                         style={{
-                          color: rf.multiplier > 1.5 ? "var(--danger)" : "var(--warning)",
+                          color:
+                            rf.multiplier > 1.5
+                              ? "var(--danger)"
+                              : "var(--warning)",
                           background:
                             rf.multiplier > 1.5
                               ? "rgba(255, 23, 68, 0.08)"
@@ -400,24 +398,24 @@ export function RiskReport({ data }: RiskReportProps) {
               </div>
             ))}
           </div>
-        </motion.section>
+        </SectionCard>
       )}
 
       {/* Deprescribing Plan */}
       {deprescribing_plan &&
         Array.isArray(deprescribing_plan.steps) &&
         deprescribing_plan.steps.length > 0 && (
-          <section>
+          <SectionCard accentColor={SECTION_ACCENT.deprescribing} delay={0.3}>
             <h3
               className="font-display font-semibold text-xs uppercase tracking-wider mb-4"
-              style={{ color: "#8a9bba" }}
+              style={{ color: SECTION_ACCENT.deprescribing }}
             >
               Deprescribing Plan
             </h3>
             {deprescribing_plan.summary && (
               <p
-                className="text-sm mb-3 leading-relaxed"
-                style={{ color: "#94a8c8" }}
+                className="text-sm mb-4 leading-relaxed"
+                style={{ color: "#c4d0e4" }}
               >
                 {deprescribing_plan.summary}
               </p>
@@ -428,9 +426,8 @@ export function RiskReport({ data }: RiskReportProps) {
               ))}
             </div>
 
-            {/* Total expected risk reduction — promoted from a floating
-                line into a proper banner card so it visually anchors the
-                deprescribing plan. */}
+            {/* Total expected risk reduction — banner card with strong
+                visual presence. */}
             <div
               className="mt-4 p-4 rounded-lg flex items-center justify-between gap-4"
               style={{
@@ -465,50 +462,75 @@ export function RiskReport({ data }: RiskReportProps) {
               </div>
             </div>
 
+            {/* Clinical warnings — each warning now lives in its own
+                amber-bordered card with a leading icon and proper
+                multiline wrap. The original rendering stacked them as
+                bare paragraphs that visually merged into one wall of
+                orange text; this gives each warning a clear boundary
+                and rhythm. */}
             {deprescribing_plan.warnings &&
               deprescribing_plan.warnings.length > 0 && (
-                <div className="mt-3 space-y-1">
+                <div className="mt-4 space-y-2">
+                  <h4
+                    className="font-display font-semibold text-[10px] uppercase tracking-widest"
+                    style={{
+                      color: "var(--warning)",
+                      letterSpacing: "0.18em",
+                    }}
+                  >
+                    Clinical Warnings ({deprescribing_plan.warnings.length})
+                  </h4>
                   {deprescribing_plan.warnings.map((w: string, i: number) => (
-                    <p
+                    <div
                       key={i}
-                      className="text-xs"
-                      style={{ color: "var(--warning)" }}
+                      className="rounded-lg p-3 flex gap-3 items-start"
+                      style={{
+                        background: "rgba(245, 158, 11, 0.05)",
+                        border: "1px solid rgba(245, 158, 11, 0.2)",
+                        transition: "all 0.3s ease",
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.borderColor = "rgba(245, 158, 11, 0.45)";
+                        e.currentTarget.style.boxShadow = "0 0 14px rgba(245, 158, 11, 0.12)";
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.borderColor = "rgba(245, 158, 11, 0.2)";
+                        e.currentTarget.style.boxShadow = "none";
+                      }}
                     >
-                      ⚠ {w}
-                    </p>
+                      <span
+                        className="text-lg leading-none flex-shrink-0 mt-0.5"
+                        style={{ color: "var(--warning)" }}
+                      >
+                        ⚠
+                      </span>
+                      <p
+                        className="text-xs leading-relaxed flex-1"
+                        style={{ color: "#d0daea" }}
+                      >
+                        {w}
+                      </p>
+                    </div>
                   ))}
                 </div>
               )}
-          </section>
+          </SectionCard>
         )}
 
       {/* Evidence Citations */}
       {evidenceCitations.length > 0 && (
-        <motion.section
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="glass-panel p-5"
-          onMouseEnter={(e) => {
-            e.currentTarget.style.borderColor = "rgba(0, 229, 255, 0.22)";
-            e.currentTarget.style.boxShadow = "0 0 20px rgba(0, 229, 255, 0.08)";
-            e.currentTarget.style.transform = "translateY(-1px)";
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.borderColor = "rgba(0, 229, 255, 0.07)";
-            e.currentTarget.style.boxShadow = "none";
-            e.currentTarget.style.transform = "translateY(0)";
-          }}
-          style={{ transition: "all 0.4s cubic-bezier(0.22, 1, 0.36, 1)" }}
-        >
+        <SectionCard accentColor={SECTION_ACCENT.citations} delay={0.35}>
           <h3
             className="font-display font-semibold text-xs uppercase tracking-wider mb-3"
-            style={{ color: "#8a9bba" }}
+            style={{ color: SECTION_ACCENT.citations }}
           >
             Evidence Citations ({evidenceCitations.length})
           </h3>
           <div className="flex flex-wrap gap-2">
             {evidenceCitations.map((c: string, i: number) => {
-              const isPubMed = /^\d{7,8}$/.test(c.trim()) || c.toLowerCase().includes("pubmed");
+              const isPubMed =
+                /^\d{7,8}$/.test(c.trim()) ||
+                c.toLowerCase().includes("pubmed");
               const pubmedId = c.match(/\d{7,8}/)?.[0];
 
               return isPubMed && pubmedId ? (
@@ -522,14 +544,14 @@ export function RiskReport({ data }: RiskReportProps) {
                     fontFamily: "var(--font-mono)",
                     color: "var(--primary)",
                     background: "var(--primary-dim)",
-                    border: "1px solid rgba(0, 229, 255, 0.1)",
+                    border: "1px solid rgba(0, 229, 255, 0.15)",
                   }}
                   onMouseEnter={(e) => {
-                    e.currentTarget.style.borderColor = "rgba(0, 229, 255, 0.3)";
-                    e.currentTarget.style.boxShadow = "0 0 12px rgba(0, 229, 255, 0.12)";
+                    e.currentTarget.style.borderColor = "rgba(0, 229, 255, 0.45)";
+                    e.currentTarget.style.boxShadow = "0 0 12px rgba(0, 229, 255, 0.18)";
                   }}
                   onMouseLeave={(e) => {
-                    e.currentTarget.style.borderColor = "rgba(0, 229, 255, 0.1)";
+                    e.currentTarget.style.borderColor = "rgba(0, 229, 255, 0.15)";
                     e.currentTarget.style.boxShadow = "none";
                   }}
                   title={`Open PubMed ${pubmedId}`}
@@ -544,7 +566,7 @@ export function RiskReport({ data }: RiskReportProps) {
                     fontFamily: "var(--font-mono)",
                     color: "var(--primary)",
                     background: "var(--primary-dim)",
-                    border: "1px solid rgba(0, 229, 255, 0.1)",
+                    border: "1px solid rgba(0, 229, 255, 0.15)",
                   }}
                 >
                   📎 {c}
@@ -552,35 +574,21 @@ export function RiskReport({ data }: RiskReportProps) {
               );
             })}
           </div>
-        </motion.section>
+        </SectionCard>
       )}
 
-      {/* Full Report Text — now collapsible.
-          The agent often returns a pretty-printed JSON dump here, which is
-          informative for debugging but ugly inline. Hidden by default. */}
+      {/* Full Report Text — collapsible. The agent often returns a JSON
+          dump here, which is useful for debugging but useless to clinical
+          users. Default-hidden, slate accent (de-emphasised vs the
+          clinical sections above). */}
       {report.report_text && (
-        <motion.section
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="glass-panel p-5"
-          onMouseEnter={(e) => {
-            e.currentTarget.style.borderColor = "rgba(0, 229, 255, 0.22)";
-            e.currentTarget.style.boxShadow = "0 0 20px rgba(0, 229, 255, 0.08)";
-            e.currentTarget.style.transform = "translateY(-1px)";
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.borderColor = "rgba(0, 229, 255, 0.07)";
-            e.currentTarget.style.boxShadow = "none";
-            e.currentTarget.style.transform = "translateY(0)";
-          }}
-          style={{ transition: "all 0.4s cubic-bezier(0.22, 1, 0.36, 1)" }}
-        >
+        <SectionCard accentColor={SECTION_ACCENT.raw} delay={0.4}>
           <div className="flex items-center justify-between mb-3">
             <h3
               className="font-display font-semibold text-xs uppercase tracking-wider"
-              style={{ color: "#8a9bba" }}
+              style={{ color: SECTION_ACCENT.raw }}
             >
-              Full Report
+              Full Report (Raw)
             </h3>
             <button
               type="button"
@@ -614,7 +622,7 @@ export function RiskReport({ data }: RiskReportProps) {
               className="text-xs leading-relaxed"
               style={{ color: "#7a8ba8" }}
             >
-              Raw report payload from the agent ({report.report_text.length.toLocaleString()} characters). Hidden by default for readability — expand to inspect.
+              Raw report payload from the agent ({report.report_text.length.toLocaleString()} characters). Hidden by default and excluded from the PDF and HTML exports. Expand to inspect.
             </p>
           )}
 
@@ -633,10 +641,10 @@ export function RiskReport({ data }: RiskReportProps) {
               {report.report_text}
             </pre>
           )}
-        </motion.section>
+        </SectionCard>
       )}
 
-      {/* Disclaimer — readable color */}
+      {/* Disclaimer */}
       <div
         className="text-center text-[11px] pt-4 pb-2 leading-relaxed"
         style={{ color: "#7a8ba8" }}
@@ -672,7 +680,7 @@ function BurdenCard({
   return (
     // `h-full flex flex-col` lets the card fill the grid row height the
     // parent enforces with `items-stretch`. The contributor list is pinned
-    // to the bottom with `mt-auto` so all three cards share the same baseline.
+    // to the bottom with `mt-auto` so all three cards share a baseline.
     <div
       className="p-4 rounded-lg h-full flex flex-col"
       style={{
@@ -688,7 +696,10 @@ function BurdenCard({
       }}
       onMouseLeave={(e) => {
         const el = e.currentTarget;
-        el.style.borderColor = riskLevel === "high" || riskLevel === "critical" ? "rgba(255, 23, 68, 0.15)" : "var(--border)";
+        el.style.borderColor =
+          riskLevel === "high" || riskLevel === "critical"
+            ? "rgba(255, 23, 68, 0.15)"
+            : "var(--border)";
         el.style.boxShadow = "none";
         el.style.transform = "translateY(0)";
       }}
@@ -741,10 +752,7 @@ function BurdenCard({
               className="flex items-center justify-between text-[10px]"
             >
               <span style={{ color: "#94a8c8" }}>{c.drug_name}</span>
-              <span
-                className="font-mono"
-                style={{ color }}
-              >
+              <span className="font-mono" style={{ color }}>
                 +{c.contribution?.toFixed(1) ?? "?"}
               </span>
             </div>

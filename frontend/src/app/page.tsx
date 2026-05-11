@@ -21,7 +21,11 @@ const HeroBackground = dynamic(
 
 const stats = [
   { value: "$42B", label: "Annual cost of medication errors worldwide", source: "WHO, 2024", url: "https://www.who.int/publications/i/item/9789240088887" },
-  { value: "90%+", label: "Drug alerts overridden by clinicians globally", source: "Clinical Literature", url: "https://pubmed.ncbi.nlm.nih.gov/" },
+  // Nanji 2014 reports physician override rates of 89–96% for medication
+  // alerts — the canonical citation for the "90%+ overridden" figure.
+  // Previously this pointed to the bare pubmed.ncbi.nlm.nih.gov homepage,
+  // which opened an empty search form and made the card feel broken.
+  { value: "90%+", label: "Drug alerts overridden by clinicians globally", source: "Nanji et al., 2014", url: "https://pubmed.ncbi.nlm.nih.gov/24371105/" },
   { value: "39%", label: "Adults 60+ taking five or more medications", source: "Wang et al., 2024", url: "https://pubmed.ncbi.nlm.nih.gov/39135518/" },
   { value: "52%", label: "Polypharmacy rate among hospital inpatients", source: "Kim et al., 2024", url: "https://pubmed.ncbi.nlm.nih.gov/38733922/" },
 ];

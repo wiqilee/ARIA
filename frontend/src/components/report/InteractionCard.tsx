@@ -192,14 +192,16 @@ export function InteractionCard({
         {/* "Details" pill — always-visible affordance.
             This is the primary cue that the card expands. Severity-coloured
             so it reads as part of the card's identity. Animates rotation +
-            label change between collapsed/expanded states. */}
+            label change between collapsed/expanded states.
+            `ml-2` adds breathing room between the SeverityMeter and the
+            pill so the score isn't visually crushed against it. */}
         <motion.div
           animate={{
             backgroundColor: hovered || expanded ? tintBg : "rgba(2, 8, 23, 0.5)",
             borderColor: hovered || expanded ? tintBorderStrong : "rgba(0, 229, 255, 0.12)",
           }}
           transition={{ duration: 0.3 }}
-          className="flex items-center gap-1.5 flex-shrink-0 px-2.5 py-1 rounded-md mt-0.5"
+          className="flex items-center gap-1.5 flex-shrink-0 px-2.5 py-1 rounded-md mt-0.5 ml-4"
           style={{
             border: "1px solid",
             fontFamily: "var(--font-mono, ui-monospace)",

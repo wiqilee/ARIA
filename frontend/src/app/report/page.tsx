@@ -858,7 +858,19 @@ function generateReportHTML(data: AnalyzeResponse, request: AnalyzeRequest | nul
   <h2>Phenotype Profile</h2>
   <table><thead><tr><th>Parameter</th><th>Value</th></tr></thead><tbody>${phenoRows}</tbody></table>
 
-  ${report?.interaction_summary ? `<h2>Interaction Summary</h2><p>${esc(report.interaction_summary)}</p>` : ""}
+  ${(() => {
+    // Mirror the placeholder detection used by the on-page RiskReport, so
+    // the exported HTML/PDF never includes a useless "See full report
+    // below" line when the agent didn't produce a real summary. Long real
+    // summaries (≥30 chars) always pass through; short strings only pass
+    // if they don't match any placeholder pattern.
+    const s = (report?.interaction_summary ?? "").trim();
+    if (!s) return "";
+    const placeholders = ["see full report", "see report", "see below", "n/a", "none", "tbd"];
+    const lower = s.toLowerCase();
+    if (s.length < 30 && placeholders.some((p) => lower.includes(p))) return "";
+    return `<h2>Interaction Summary</h2><p>${esc(s)}</p>`;
+  })()}
 
   ${(report?.critical_findings ?? []).length > 0
     ? `<h2>Critical Findings</h2>${report!.critical_findings.map((f: string) => `<div class="finding">${esc(f)}</div>`).join("")}`
@@ -909,7 +921,12 @@ function generateReportHTML(data: AnalyzeResponse, request: AnalyzeRequest | nul
       : ""}
   ` : ""}
 
-  ${report?.report_text ? `<h2>Full Clinical Report</h2><p style="white-space:pre-wrap">${esc(report.report_text)}</p>` : ""}
+  ${/* Raw report payload (typically a JSON dump from the agent) is
+       deliberately excluded from the HTML and PDF exports. Clinical end
+       users find the JSON unreadable and it inflates the export with
+       noise. The raw payload is still available in the web UI under the
+       "Full Report (Raw)" section behind a "Show raw" toggle for
+       developers and auditors who need to inspect it. */ ""}
 
   <div class="ft">
     <p><strong>ARIA</strong> — Adaptive Risk Intelligence for Polypharmacy Assessment</p>
