@@ -1130,7 +1130,7 @@ This project is licensed under the MIT License. See the [LICENSE](LICENSE) file 
 
 ## Built By
 
-**Wiqi Lee**, Data Scientist, AI/ML Researcher, Software Engineer
+**Wiqi Lee**, Data Scientist, AI/ML Researcher, Software Engineer, Cellist
 
 [![X](https://img.shields.io/badge/@wiqi__lee-000000?logo=x)](https://x.com/wiqi_lee)
 [![Medium](https://img.shields.io/badge/Medium-Read_Articles-black?logo=medium)](https://medium.com/@wiqi_lee/eighteen-warnings-in-fourteen-seconds-why-i-created-aria-ffb06d1a3a13)
