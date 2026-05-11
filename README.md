@@ -6,8 +6,8 @@
 **An AI agent that does not just detect drug interactions. It reasons about them.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Rust](https://img.shields.io/badge/Rust-MCP_Server-orange?logo=rust)](https://www.rust-lang.org/)
-[![Python](https://img.shields.io/badge/Python-Agent_Layer-blue?logo=python)](https://www.python.org/)
+[![Rust](https://img.shields.io/badge/Rust-MCP_Server-orange?logo=rust)](https://aria-mcp-server-233281205053.asia-southeast2.run.app/health)
+[![Python](https://img.shields.io/badge/Python-Agent_Layer-blue?logo=python)](https://aria-a2a-agent-233281205053.asia-southeast2.run.app/health)
 [![Google Cloud Run](https://img.shields.io/badge/Google_Cloud-Run_asia--southeast2-4285F4?logo=googlecloud)](https://aria-a2a-agent-233281205053.asia-southeast2.run.app/health)
 [![Gemini](https://img.shields.io/badge/Gemini-2.5_Pro-8E75B2?logo=googlegemini)](https://deepmind.google/technologies/gemini/)
 [![Vercel](https://img.shields.io/badge/Deployed_on-Vercel-black?logo=vercel)](https://aria-polypharmacy.vercel.app/)
@@ -129,7 +129,7 @@ All three paths hit the same backend, so the clinical reasoning is identical reg
 | Polypharmacy in older adults, India | 49% | [Nature Scientific Reports, 2023](https://www.nature.com/articles/s41598-023-45095-2) |
 | Polypharmacy in older adults, Ethiopia | 37% | [Nature Scientific Reports, 2023](https://www.nature.com/articles/s41598-023-45095-2) |
 | Higher medication-error risk on 5+ drugs | 30% higher incidence | [StatPearls, 2024](https://www.ncbi.nlm.nih.gov/books/NBK519065/) |
-| Drug interaction alerts overridden by clinicians | Over 90% | Clinical literature |
+| Drug interaction alerts overridden by clinicians | Over 90% | [Nanji et al., 2014](https://pubmed.ncbi.nlm.nih.gov/24371105/) |
 | Medication-error impact in LMICs vs. high-income countries | 2x higher healthy life years lost | [WHO, 2017](https://www.who.int/news/item/29-03-2017-who-launches-global-effort-to-halve-medication-related-errors-in-5-years) |
 
 Alert fatigue is not a behavior problem. It is a tool design problem. ARIA is the fix, built for every health system, everywhere.
