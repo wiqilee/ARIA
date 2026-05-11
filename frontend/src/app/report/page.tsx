@@ -587,7 +587,7 @@ function generateReportHTML(data: AnalyzeResponse, request: AnalyzeRequest | nul
     rawIx.length > 0 &&
     rawIx.some(
       (ix) =>
-        (ix.evidence_grade != null && ix.evidence_grade !== "") ||
+        ix.evidence_grade != null ||
         ix.confidence_score != null,
     );
   const showEvidenceCols = hasAnyEvidence;
