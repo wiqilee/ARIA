@@ -15,7 +15,7 @@
 
 [![Medium](https://img.shields.io/badge/Read_on-Medium-black?logo=medium)](https://medium.com/@wiqi_lee/eighteen-warnings-in-fourteen-seconds-why-i-created-aria-ffb06d1a3a13)
 [![X](https://img.shields.io/badge/@wiqi__lee-000000?logo=x)](https://x.com/wiqi_lee)
-[![YouTube](https://img.shields.io/badge/Demo-YouTube-red?logo=youtube)](https://youtube.com/YOUR_DEMO_LINK)
+[![YouTube](https://img.shields.io/badge/Demo-YouTube-red?logo=youtube)](https://youtu.be/VTnlH0GXBGk)
 
 <br/>
 
@@ -1134,7 +1134,7 @@ This project is licensed under the MIT License. See the [LICENSE](LICENSE) file 
 
 [![X](https://img.shields.io/badge/@wiqi__lee-000000?logo=x)](https://x.com/wiqi_lee)
 [![Medium](https://img.shields.io/badge/Medium-Read_Articles-black?logo=medium)](https://medium.com/@wiqi_lee/eighteen-warnings-in-fourteen-seconds-why-i-created-aria-ffb06d1a3a13)
-[![YouTube](https://img.shields.io/badge/Demo_Video-YouTube-red?logo=youtube)](https://youtube.com/YOUR_DEMO_LINK)
+[![YouTube](https://img.shields.io/badge/Demo_Video-YouTube-red?logo=youtube)](https://youtu.be/VTnlH0GXBGk)
 
 ---
 
