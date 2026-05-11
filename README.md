@@ -391,7 +391,7 @@ Expected response: a JSON-RPC envelope where `result.task.status.state` is `"TAS
 
 ## Prompt Opinion Marketplace Integration
 
-ARIA is published to the [Prompt Opinion Marketplace](https://app.promptopinion.ai) as part of the [Agents Assemble Hackathon](https://agents-assemble.devpost.com). The integration follows **Path B (A2A Agent)** as defined in the competition rules.
+ARIA is published to the [Prompt Opinion Marketplace](https://app.promptopinion.ai/marketplace/agent/019e07f1-1952-7b07-8a90-4274fdbe8b49) as part of the [Agents Assemble Hackathon](https://agents-assemble.devpost.com). The integration follows **Path B (A2A Agent)** as defined in the competition rules.
 
 ### Integration Flow
 
