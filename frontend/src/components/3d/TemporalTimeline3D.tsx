@@ -131,7 +131,7 @@ export function TemporalTimeline3D({ data, onPointHover }: TemporalTimeline3DPro
         <Line points={[[-4, -1.5, 0], [4, -1.5, 0]]} color="#1e3a5f" lineWidth={1} />
         <Line points={[[-4, -1.5, 0], [-4, 1.5, 0]]} color="#1e3a5f" lineWidth={1} />
 
-      <Text position={[0, -2.1, 0]} fontSize={0.3} color="#eaf0fa" anchorX="center"
+      <Text position={[0, -2.35, 0]} fontSize={0.3} color="#eaf0fa" anchorX="center"
         outlineWidth={0.012} outlineColor="#020817" fontWeight={600}>
         Days
       </Text>
@@ -178,7 +178,11 @@ export function TemporalTimeline3D({ data, onPointHover }: TemporalTimeline3DPro
         visible={animProgress > (peakRiskDay / Math.max(timelineDays, 1))}
       />
 
-      {/* Intervention windows */}
+      {/* Intervention windows. We pass `laneIndex` so the InterventionZone
+          can stagger its label vertically — without it, multiple windows
+          on overlapping day ranges would render their labels at the same
+          Y position and the text would collide horribly (the original bug:
+          three windows' labels piled on top of each other above the chart). */}
       {interventionWindows.map((w, i) => {
         const xScale = 8 / Math.max(timelineDays, 1);
         const x1 = -4 + (w.day_start ?? 0) * xScale;
@@ -186,7 +190,14 @@ export function TemporalTimeline3D({ data, onPointHover }: TemporalTimeline3DPro
         const visible = animProgress > ((w.day_start ?? 0) / Math.max(timelineDays, 1));
         if (!visible) return null;
         return (
-          <InterventionZone key={i} x1={x1} x2={x2} label={w.action ?? ""} urgency={w.urgency} />
+          <InterventionZone
+            key={i}
+            x1={x1}
+            x2={x2}
+            label={w.action ?? ""}
+            urgency={w.urgency}
+            laneIndex={i}
+          />
         );
       })}
 
@@ -260,16 +271,13 @@ export function TemporalTimeline3D({ data, onPointHover }: TemporalTimeline3DPro
         </mesh>
       )}
 
-      {/* Inline tooltip is deliberately omitted here. The parent renders an
-          HTML side-panel overlay (never clipped) via onPointHover. */}
-
-      {/* Summary */}
-      {animProgress > 0.9 && summary && (
-        <Text position={[0, -2.5, 0]} fontSize={0.14} color="#cbd5e1" anchorX="center" maxWidth={8}
-          outlineWidth={0.008} outlineColor="#020817">
-          {summary}
-        </Text>
-      )}
+      {/* The cascade summary used to live here as a Three.js Text at
+          y=-2.5 with maxWidth=8 — but Three.js Text wraps to an
+          unpredictable number of lines, and a 3-line wrap would collide
+          with the "Days" axis label at y=-2.1 (visible in the screenshot
+          as text overlapping the axis). The summary is now rendered as
+          proper HTML in the parent's "Timeline Interpretation" card,
+          which reflows correctly. */}
       </group>
     </>
   );
@@ -364,10 +372,41 @@ function PeakMarker({
   );
 }
 
-function InterventionZone({ x1, x2, label, urgency }: { x1: number; x2: number; label: string; urgency?: string }) {
+function InterventionZone({
+  x1,
+  x2,
+  label,
+  urgency,
+  laneIndex,
+}: {
+  x1: number;
+  x2: number;
+  label: string;
+  urgency?: string;
+  laneIndex: number;
+}) {
   const width = Math.max(x2 - x1, 0.1);
   const centerX = x1 + width / 2;
   const zoneColor = urgency === "immediate" || urgency === "high" ? "#ef4444" : "#06b6d4";
+
+  // Truncate aggressively — these action strings can be a full sentence
+  // ("Continue close monitoring of INR, bleeding signs and blood pressure")
+  // which is impossible to read on a 3D chart no matter how we position it.
+  // Full text lives in the parent's HTML TimelineInterpretation panel.
+  const MAX_LABEL = 32;
+  const trimmed = label.length > MAX_LABEL
+    ? label.slice(0, MAX_LABEL).trimEnd() + "…"
+    : label;
+
+  // Stagger labels vertically by lane index. Each lane is 0.4 world units
+  // tall; with 3 typical windows the labels land at y=1.95, 2.35, 2.75 —
+  // no overlap, all still inside the camera's default frustum.
+  const labelY = 1.95 + laneIndex * 0.4;
+
+  // Tick mark connecting the label to the zone's top edge, so the user can
+  // still tell which zone each (staggered) label belongs to.
+  const tickX = x1 + 0.05;
+
   return (
     <group>
       <mesh position={[centerX, 0, -0.1]}>
@@ -375,8 +414,29 @@ function InterventionZone({ x1, x2, label, urgency }: { x1: number; x2: number; 
         <meshBasicMaterial color={zoneColor} transparent opacity={0.06} />
       </mesh>
       <Line points={[[x1, 1.5, 0], [x2, 1.5, 0]]} color={zoneColor} lineWidth={1} transparent opacity={0.4} />
-      <Text position={[centerX, 1.9, 0]} fontSize={0.2} color={zoneColor} anchorX="center"
-        outlineWidth={0.012} outlineColor="#020817" fontWeight={600}>{label}</Text>
+      {/* Vertical connector from zone's top edge up to the label's lane. */}
+      <Line
+        points={[[tickX, 1.5, 0], [tickX, labelY - 0.12, 0]]}
+        color={zoneColor}
+        lineWidth={1}
+        transparent
+        opacity={0.45}
+        dashed
+        dashSize={0.06}
+        gapSize={0.04}
+      />
+      <Text
+        position={[tickX + 0.1, labelY, 0]}
+        fontSize={0.18}
+        color={zoneColor}
+        anchorX="left"
+        anchorY="middle"
+        outlineWidth={0.012}
+        outlineColor="#020817"
+        fontWeight={600}
+      >
+        {trimmed}
+      </Text>
     </group>
   );
 }

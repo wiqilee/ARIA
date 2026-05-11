@@ -1859,10 +1859,21 @@ export default function ReportPage() {
           </div>
         </motion.div>
 
-        {/* ── Main grid: stack on mobile, side-by-side on desktop ── */}
-        <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
+        {/* ── Main grid: stack on mobile, side-by-side on desktop ──
+            On desktop the left column (3D viz + interpretation panel) is
+            much shorter than the right column (overall risk + patient
+            summary + the long RiskReport listing every interaction,
+            deprescribing step, citation, etc). Plain `grid grid-cols-5`
+            leaves a huge empty gap below the left column. Making the left
+            column `sticky` with `self-start` keeps it pinned to the top of
+            the viewport while the user scrolls through the report on the
+            right — no dead space, and the 3D context stays visible while
+            reading the detailed findings. We deliberately do NOT add
+            overflow-y to the sticky container because it would steal scroll
+            events from the 3D canvas's OrbitControls zoom. */}
+        <div className="grid grid-cols-1 lg:grid-cols-5 gap-6 items-start">
           {/* Left — 3D */}
-          <div className="lg:col-span-3 space-y-4">
+          <div className="lg:col-span-3 space-y-4 lg:sticky lg:top-4 lg:self-start">
             {/* Viz tabs with hover animation */}
             <div className="flex gap-1 p-1 rounded-xl overflow-x-auto" style={{ background: "rgba(8,20,37,0.6)", border: "1px solid var(--border)" }}>
               {vizTabs.map((tab) => (
