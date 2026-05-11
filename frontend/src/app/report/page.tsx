@@ -575,24 +575,40 @@ function generateReportHTML(data: AnalyzeResponse, request: AnalyzeRequest | nul
   // ── Section builders ──────────────────────────────────
 
   // Interaction rows: prefer raw_interactions (richer) but fall back to
-  // graph.edges so the PDF is never empty when the demo data is used.
-  const rawIx = data.raw_interactions?.interactions ?? [];
-  const interactionRows = rawIx.length > 0
+  // Decide whether to show the Evidence and Confidence columns in the
+  // exported table. If every row would be "—" (because the agent hasn't
+  // populated `evidence_grade` and `confidence_score` for any interaction),
+  // showing the columns just looks like the export is broken. We hide them
+  // entirely in that case and re-emit narrower rows.
+  const hasAnyEvidence =
+    rawIx.length > 0 &&
+    rawIx.some(
+      (ix) =>
+        (ix.evidence_grade != null && ix.evidence_grade !== "") ||
+        ix.confidence_score != null,
+    );
+  const showEvidenceCols = hasAnyEvidence;
+
+  const interactionRowsFinal = rawIx.length > 0
     ? rawIx.map((ix) => `
         <tr>
           <td>${esc((ix.drugs ?? []).join(" + "))}</td>
           <td><span class="sev sev-${ix.severity}">${esc(ix.severity.toUpperCase())}</span></td>
           <td>${esc(ix.description)}</td>
-          <td>${esc(ix.evidence_grade ?? "—")}</td>
-          <td>${ix.confidence_score != null ? ix.confidence_score + "%" : "—"}</td>
+          ${showEvidenceCols
+            ? `<td>${esc(ix.evidence_grade ?? "—")}</td>
+               <td>${ix.confidence_score != null ? ix.confidence_score + "%" : "—"}</td>`
+            : ""}
         </tr>`).join("")
     : resolvedGraph.edges.map((e) => `
         <tr>
           <td>${esc(e.source)} + ${esc(e.target)}</td>
           <td><span class="sev sev-${e.severity}">${esc(e.severity.toUpperCase())}</span></td>
           <td>${esc(e.interaction_type)}</td>
-          <td>—</td>
-          <td>${Math.round((e.weight ?? 0) * 100)}%</td>
+          ${showEvidenceCols
+            ? `<td>—</td>
+               <td>${Math.round((e.weight ?? 0) * 100)}%</td>`
+            : ""}
         </tr>`).join("");
 
   const totalInteractions = rawIx.length > 0 ? (data.raw_interactions?.total_interactions ?? rawIx.length) : resolvedGraph.edges.length;
@@ -876,12 +892,12 @@ function generateReportHTML(data: AnalyzeResponse, request: AnalyzeRequest | nul
     ? `<h2>Critical Findings</h2>${report!.critical_findings.map((f: string) => `<div class="finding">${esc(f)}</div>`).join("")}`
     : ""}
 
-  ${interactionRows ? `
+  ${interactionRowsFinal ? `
     <h2>Drug Interactions (${totalInteractions})</h2>
     <p>${resolvedGraph.nodes.length} drugs · ${resolvedGraph.edges.length} pairwise interactions · Density ${((resolvedGraph.graph_density ?? 0) * 100).toFixed(0)}% · ${criticalCount} critical · ${highCount} high${hubDrugs.length > 0 ? ` · Hub drugs: <strong>${esc(hubDrugs.join(", "))}</strong>` : ""}</p>
     <table>
-      <thead><tr><th>Drugs</th><th>Severity</th><th>Mechanism / Description</th><th>Evidence</th><th>Confidence</th></tr></thead>
-      <tbody>${interactionRows}</tbody>
+      <thead><tr><th>Drugs</th><th>Severity</th><th>Mechanism / Description</th>${showEvidenceCols ? "<th>Evidence</th><th>Confidence</th>" : ""}</tr></thead>
+      <tbody>${interactionRowsFinal}</tbody>
     </table>
     ${emergent.length > 0 ? `
       <h3>Emergent Multi-Drug Interactions</h3>
@@ -2270,10 +2286,17 @@ export default function ReportPage() {
                       })}
                     </div>
                   )}
-                  {/* Quick stats — with hover animation */}
+                  {/* Quick stats — with hover animation.
+                      "Interactions" uses `totalInteractions` (pairwise +
+                      emergent multi-drug) so the number matches the
+                      "Detected Interactions (N)" header and the
+                      "Interaction Summary" sentence. Previously this
+                      counted only graph edges, which excluded emergent
+                      multi-drug interactions and produced an inconsistent
+                      "4" on the card while every other section said "7". */}
                   <div className="grid grid-cols-2 gap-1.5 text-[10px]">
                     {[
-                      { label: "Interactions", value: (effectiveGraph?.edges ?? []).length, bg: "rgba(6,182,212,0.06)", border: "rgba(6,182,212,0.15)", color: "#eaf0fa", hoverBg: "rgba(6,182,212,0.12)" },
+                      { label: "Interactions", value: totalInteractions, bg: "rgba(6,182,212,0.06)", border: "rgba(6,182,212,0.15)", color: "#eaf0fa", hoverBg: "rgba(6,182,212,0.12)" },
                       { label: "Risk", value: `${numScore.toFixed(1)}/10`, bg: riskInfo.bgColor, border: `${riskInfo.color}22`, color: riskInfo.color, hoverBg: `${riskInfo.color}18` },
                       { label: "Critical", value: (effectiveGraph?.edges ?? []).filter(e => e.severity === "critical").length, bg: "rgba(239,68,68,0.06)", border: "rgba(239,68,68,0.15)", color: "#ef4444", hoverBg: "rgba(239,68,68,0.12)" },
                       { label: "Deprescribe", value: `${(effectiveDeprescribing?.steps ?? []).length} steps`, bg: "rgba(16,185,129,0.06)", border: "rgba(16,185,129,0.15)", color: "#10b981", hoverBg: "rgba(16,185,129,0.12)" },
