@@ -19,6 +19,7 @@ import asyncio
 import json
 import json as _json_dbg
 import logging
+import math
 import os
 import re
 import sys
@@ -549,6 +550,51 @@ def _risk_emoji(score: float | int | None) -> str:
     return "🟢"
 
 
+def _format_risk_reduction(raw: Any) -> str | None:
+    """Normalize a risk-reduction value into a clinically valid percentage string.
+
+    Risk reduction is bounded between 0% and 100%. This guardrail prevents
+    nonsensical outputs like "1200%" that would undermine clinical credibility.
+
+    Detection heuristic:
+    - If 0 <= raw <= 1.0, treat as a fraction (e.g. 0.73 → 73%).
+    - If 1 < raw <= 100, treat as already-in-percent (e.g. 73 → 73%).
+    - If raw > 100, clamp to 100% and log a warning (likely a pipeline bug
+      such as naive summation of per-interaction reductions, which should
+      instead be combined probabilistically via 1 - Π(1 - r_i)).
+    - Negative, NaN, or non-numeric inputs return None (omit the line).
+
+    Returns the formatted percentage string (e.g. "73%") or None if the
+    input cannot be sensibly rendered.
+    """
+    if raw is None:
+        return None
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return None
+    if math.isnan(value) or math.isinf(value):
+        return None
+    if value < 0:
+        return None
+
+    if value <= 1.0:
+        pct = value * 100.0
+    else:
+        pct = value
+
+    if pct > 100.0:
+        logger.warning(
+            "Risk reduction value %s exceeds 100%% — clamping. This usually "
+            "indicates the pipeline is summing per-interaction reductions "
+            "linearly instead of combining them probabilistically.",
+            raw,
+        )
+        pct = 100.0
+
+    return f"{round(pct)}%"
+
+
 def _fmt_patient(patient: Any) -> str:
     if not isinstance(patient, dict) or not patient:
         return "_No patient context provided._"
@@ -761,14 +807,12 @@ def _format_pipeline_result_markdown(
                 lines.append(f"{i}. {a}")
         total_red = plan.get("total_expected_risk_reduction")
         plan_summary = plan.get("summary")
-        if total_red is not None:
+        formatted_reduction = _format_risk_reduction(total_red)
+        if formatted_reduction is not None:
             lines.append("")
-            try:
-                lines.append(
-                    f"**Expected total risk reduction:** {round(float(total_red) * 100)}%"
-                )
-            except (TypeError, ValueError):
-                pass
+            lines.append(
+                f"**Expected total risk reduction:** {formatted_reduction}"
+            )
         if plan_summary:
             lines.append("")
             lines.append(f"_{plan_summary}_")
