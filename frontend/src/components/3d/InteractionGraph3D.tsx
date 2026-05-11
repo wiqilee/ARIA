@@ -106,6 +106,21 @@ export function InteractionGraph3D({
     return map;
   }, [nodePositions]);
 
+  // Pre-compute which nodes have at least one edge. Orphan nodes (no
+  // edges — e.g. a drug we surfaced for completeness but which has no
+  // interactions with the rest of the regimen, like digoxin in some
+  // regimens) feel only repulsion from the cluster and would drift to
+  // the edge of the canvas without compensating force. We use this set
+  // below to apply an extra inward pull just to them.
+  const connectedNodes = useMemo(() => {
+    const s = new Set<string>();
+    for (const edge of edges) {
+      s.add(edge.source);
+      s.add(edge.target);
+    }
+    return s;
+  }, [edges]);
+
   // Force-directed simulation + re-render trigger
   const frameCount = useRef(0);
   useFrame(() => {
@@ -114,7 +129,19 @@ export function InteractionGraph3D({
     const damping = 0.92;
     const repulsion = 0.8;
     const attraction = 0.01;
-    const centerPull = 0.005;
+    // Center pull is much stronger than the original 0.005. Weak pull let
+    // orphan nodes drift to the canvas boundary; this brings every node
+    // back toward the cluster so the whole graph fits in the default view.
+    const centerPull = 0.03;
+    // Extra inward pull applied only to orphans. Repulsion from a tight
+    // cluster of 4+ connected nodes is large, and the orphan needs enough
+    // counter-force to settle just outside the cluster instead of fleeing
+    // it.
+    const isolatedExtraPull = 0.15;
+    // Hard cap on radius. Given OrbitControls' minDistance=3.5, anything
+    // past ~3.4 brushes the camera frustum. We clamp to keep the layout
+    // always inside the visible frame.
+    const maxRadius = 3.4;
 
     for (let i = 0; i < nodePositions.length; i++) {
       for (let j = i + 1; j < nodePositions.length; j++) {
@@ -142,8 +169,26 @@ export function InteractionGraph3D({
     for (const node of nodePositions) {
       const toCenter = node.pos.clone().negate().multiplyScalar(centerPull);
       node.vel.add(toCenter);
+
+      // Orphans get an extra inward pull on top of the base centerPull,
+      // so they settle near the connected cluster instead of at the rim.
+      if (!connectedNodes.has(node.drug_name)) {
+        const extra = node.pos.clone().negate().multiplyScalar(isolatedExtraPull);
+        node.vel.add(extra);
+      }
+
       node.vel.multiplyScalar(damping);
       node.pos.add(node.vel);
+
+      // Hard boundary clamp. If a node has drifted past maxRadius (can
+      // happen on the first few frames when repulsion is large), pull it
+      // back onto the boundary and damp its outward velocity so it does
+      // not immediately escape again.
+      const r = node.pos.length();
+      if (r > maxRadius) {
+        node.pos.multiplyScalar(maxRadius / r);
+        node.vel.multiplyScalar(0.4);
+      }
     }
 
     // No auto-rotation here — the parent canvas has OrbitControls, letting

@@ -186,34 +186,33 @@ export function DeprescribingWaterfall({
         );
       })}
 
-      {/* Total reduction summary */}
+      {/* Total reduction summary. The paragraph summary and warnings that
+          used to live here have moved out of the 3D scene — Three.js Text
+          with maxWidth wraps to an unpredictable number of lines, and
+          fixed-position elements below it (the warnings list) inevitably
+          overlapped the wrapped text. The summary prose and warnings are
+          rendered by the parent's HTML "Deprescribing Interpretation"
+          card, which handles reflow properly. We keep ONLY the single-line
+          total reduction here as a clean visual anchor for the waterfall. */}
       {animProgress > 0.8 && (
         <group>
           {/* Separator line */}
-          <mesh position={[0, -startY - 0.2, 0]}>
+          <mesh position={[0, -startY - 0.35, 0]}>
             <planeGeometry args={[maxWidth * 1.2, 0.01]} />
             <meshBasicMaterial color="#1e3a5f" transparent opacity={0.5} />
           </mesh>
-          <Text position={[0, -startY - 0.45, 0]} fontSize={0.24} color="#10b981" anchorX="center" fontWeight="bold"
-            outlineWidth={0.012} outlineColor="#020817">
+          <Text
+            position={[0, -startY - 0.75, 0]}
+            fontSize={0.28}
+            color="#10b981"
+            anchorX="center"
+            anchorY="middle"
+            fontWeight="bold"
+            outlineWidth={0.014}
+            outlineColor="#020817"
+          >
             {`Total risk reduction: -${(data?.total_expected_risk_reduction ?? 0).toFixed(0)}%`}
           </Text>
-          {data?.summary && (
-            <Text position={[0, -startY - 0.8, 0]} fontSize={0.12} color="#94a8c8" anchorX="center" maxWidth={7}>
-              {data.summary}
-            </Text>
-          )}
-        </group>
-      )}
-
-      {/* Warnings */}
-      {animProgress > 0.95 && (data?.warnings ?? []).length > 0 && (
-        <group>
-          {(data?.warnings ?? []).map((w, i) => (
-            <Text key={i} position={[0, -startY - 1.15 - i * 0.28, 0]} fontSize={0.11} color="#f59e0b" anchorX="center" maxWidth={7}>
-              {`⚠ ${w}`}
-            </Text>
-          ))}
         </group>
       )}
       </group>
