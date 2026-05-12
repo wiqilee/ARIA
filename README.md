@@ -129,7 +129,7 @@ All three paths hit the same backend, so the clinical reasoning is identical reg
 | Polypharmacy in older adults, India | 49% | [Nature Scientific Reports, 2023](https://www.nature.com/articles/s41598-023-45095-2) |
 | Polypharmacy in older adults, Ethiopia | 37% | [Nature Scientific Reports, 2023](https://www.nature.com/articles/s41598-023-45095-2) |
 | Higher medication-error risk on 5+ drugs | 30% higher incidence | [StatPearls, 2024](https://www.ncbi.nlm.nih.gov/books/NBK519065/) |
-| Drug interaction alerts overridden by clinicians | Over 90% | [Bryant et al., 2014](https://pubmed.ncbi.nlm.nih.gov/25298818/) |
+| Drug interaction alerts overridden by clinicians | 90% pooled (CI 85–95%) | [Felisberto et al., 2024](https://pubmed.ncbi.nlm.nih.gov/38899788/) |
 | Medication-error impact in LMICs vs. high-income countries | 2x higher healthy life years lost | [WHO, 2017](https://www.who.int/news/item/29-03-2017-who-launches-global-effort-to-halve-medication-related-errors-in-5-years) |
 
 Alert fatigue is not a behavior problem. It is a tool design problem. ARIA is the fix, built for every health system, everywhere.
