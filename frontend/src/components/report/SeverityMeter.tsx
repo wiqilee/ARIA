@@ -1,26 +1,26 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { motion, useSpring, useTransform } from "framer-motion";
+import { motion, useSpring } from "framer-motion";
+import { getSeverityColor, getSeverityLabel } from "@/lib/severity";
 
 interface SeverityMeterProps {
   value: number; // 0-10
   label?: string;
   size?: "sm" | "md" | "lg";
-}
-
-function getColor(value: number): string {
-  if (value >= 8) return "#ff0040";
-  if (value >= 6) return "#ef4444";
-  if (value >= 4) return "#f59e0b";
-  if (value >= 2) return "#06b6d4";
-  return "#10b981";
+  /**
+   * When true, render the auto-computed severity label (LOW/MODERATE/HIGH/CRITICAL)
+   * next to the numeric score. Defaults to true so the bar and its label are
+   * always in sync — no more "9.4 / 10 ... MODERATE" mismatches.
+   */
+  showSeverityLabel?: boolean;
 }
 
 export function SeverityMeter({
   value,
   label,
   size = "md",
+  showSeverityLabel = true,
 }: SeverityMeterProps) {
   const [displayValue, setDisplayValue] = useState(0);
   const springValue = useSpring(0, { stiffness: 60, damping: 15 });
@@ -36,7 +36,8 @@ export function SeverityMeter({
     return unsubscribe;
   }, [springValue]);
 
-  const color = getColor(value);
+  const color = getSeverityColor(value);
+  const severityLabel = getSeverityLabel(value);
   const percentage = (displayValue / 10) * 100;
 
   const sizes = {
@@ -58,6 +59,14 @@ export function SeverityMeter({
           {displayValue.toFixed(1)}
         </motion.span>
         <span className="text-text-muted text-sm font-mono">/ 10</span>
+        {showSeverityLabel && (
+          <span
+            className="ml-2 text-xs font-bold tracking-wider uppercase font-mono"
+            style={{ color }}
+          >
+            {severityLabel}
+          </span>
+        )}
       </div>
 
       {label && (

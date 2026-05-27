@@ -7,6 +7,13 @@ pub struct RiskScore {
     pub drugs: Vec<String>,
     pub base_score: f64,
     pub adjusted_score: f64,
+    /// Deterministic severity label derived from `adjusted_score` by
+    /// `severity_label_for_score()` in `agent_tools/score_risk.rs`.
+    /// One of: "LOW", "MODERATE", "HIGH", "CRITICAL".
+    /// `#[serde(default)]` keeps older payloads (without this field)
+    /// deserializable as empty string — the agent layer backfills it.
+    #[serde(default)]
+    pub severity_label: String,
     pub risk_factors: Vec<RiskFactor>,
     pub reasoning: String,
 }
