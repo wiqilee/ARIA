@@ -231,11 +231,17 @@ textarea::placeholder {
   transform: translateY(-1px);
 }
 
-/* ─── Severity colors ─── */
-.severity-low { color: var(--success); }
-.severity-moderate { color: var(--warning); }
-.severity-high { color: #ff6d00; }
-.severity-critical { color: var(--danger); text-shadow: 0 0 12px rgba(255, 23, 68, 0.5); }
+/* ─── Severity colors ───
+   These four classes mirror the thresholds in `src/lib/severity.ts` and
+   the Rust `severity_label_for_score()`. The earlier mismatch (`.severity-high`
+   was `#ff6d00` here while severity.ts said `#ef4444`, and severity.ts said
+   CRITICAL was `#ff0040` while the CSS used `--danger`) is what made the
+   Detected-Interactions cards look like a critical row with a moderate
+   badge. They are now in lockstep. */
+.severity-low { color: #10b981; }
+.severity-moderate { color: #f59e0b; }
+.severity-high { color: #ef4444; }
+.severity-critical { color: #ff0040; text-shadow: 0 0 12px rgba(255, 0, 64, 0.5); }
 
 /* ─── Mobile responsive fixes ─── */
 @media (max-width: 768px) {

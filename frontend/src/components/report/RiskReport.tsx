@@ -291,7 +291,7 @@ export function RiskReport({ data }: RiskReportProps) {
           {burdenScores.total_burden_summary && (
             <p
               className="text-xs mt-3 leading-relaxed"
-              style={{ color: "#8a9bba" }}
+              style={{ color: "#c7d2e0" }}
             >
               {burdenScores.total_burden_summary}
             </p>
@@ -691,10 +691,22 @@ function BurdenCard({
   const riskLevel = (detail?.risk_level || "low").toLowerCase();
   const color = BURDEN_LEVEL_COLORS[riskLevel] || "#6b7f9e";
 
-  const interpretation =
-    detail?.clinical_implication ||
-    BURDEN_EXPLANATIONS[type]?.[riskLevel] ||
-    "No additional information available.";
+  // When the LLM legitimately determines a regimen has no anticholinergic
+  // / sedation / QT-prolonging contribution it returns `total_score: 0`
+  // with `risk_level: "low"`. That's clinically valid, but a card that
+  // renders "0.0  LOW" on a dark background looks broken — exactly the
+  // complaint that surfaced in production. We swap the LOW pill for a
+  // friendlier "no contribution" line in that case, and replace the LLM's
+  // generic "Low XYZ risk" sentence with something that actually says
+  // *why* the number is zero.
+  const totalScore = typeof detail?.total_score === "number" ? detail.total_score : 0;
+  const isZero = totalScore === 0 && riskLevel === "low";
+
+  const interpretation = isZero
+    ? `No medications in this regimen contribute meaningfully to ${type === "qt" ? "QT prolongation" : type} burden.`
+    : detail?.clinical_implication ||
+      BURDEN_EXPLANATIONS[type]?.[riskLevel] ||
+      "No additional information available.";
 
   const contributors = Array.isArray(detail?.per_drug) ? detail.per_drug : [];
 
@@ -706,28 +718,28 @@ function BurdenCard({
       className="p-4 rounded-lg h-full flex flex-col"
       style={{
         background: "rgba(3, 11, 26, 0.5)",
-        border: `1px solid ${riskLevel === "high" || riskLevel === "critical" ? "rgba(255, 23, 68, 0.15)" : "var(--border)"}`,
+        border: `1px solid ${riskLevel === "high" || riskLevel === "critical" ? "rgba(255, 23, 68, 0.18)" : "var(--border)"}`,
         transition: "all 0.3s ease",
       }}
       onMouseEnter={(e) => {
         const el = e.currentTarget;
-        el.style.borderColor = `${color}44`;
-        el.style.boxShadow = `0 0 16px ${color}15`;
+        el.style.borderColor = `${color}55`;
+        el.style.boxShadow = `0 0 16px ${color}1c`;
         el.style.transform = "translateY(-1px)";
       }}
       onMouseLeave={(e) => {
         const el = e.currentTarget;
         el.style.borderColor =
           riskLevel === "high" || riskLevel === "critical"
-            ? "rgba(255, 23, 68, 0.15)"
+            ? "rgba(255, 23, 68, 0.18)"
             : "var(--border)";
         el.style.boxShadow = "none";
         el.style.transform = "translateY(0)";
       }}
     >
       <div
-        className="text-[10px] uppercase tracking-wider mb-2"
-        style={{ color: "#7a8ba8" }}
+        className="text-[10px] uppercase tracking-wider mb-2 font-semibold"
+        style={{ color: "#a3b8d0", letterSpacing: "0.14em" }}
       >
         {label}
       </div>
@@ -736,13 +748,13 @@ function BurdenCard({
           className="font-display font-bold text-2xl"
           style={{ color }}
         >
-          {(detail?.total_score ?? 0).toFixed(1)}
+          {totalScore.toFixed(1)}
         </span>
         <span
           className="text-[10px] font-semibold uppercase tracking-wider"
-          style={{ color }}
+          style={{ color, letterSpacing: "0.14em" }}
         >
-          {riskLevel}
+          {isZero ? "none" : riskLevel}
         </span>
       </div>
       {/* Mini risk bar */}
@@ -753,27 +765,29 @@ function BurdenCard({
         <div
           className="h-full rounded-full transition-all"
           style={{
-            width: `${Math.min((detail?.total_score ?? 0) * 10, 100)}%`,
+            width: `${Math.min(totalScore * 10, 100)}%`,
             background: color,
           }}
         />
       </div>
       <p
         className="text-[11px] leading-snug"
-        style={{ color: "#8a9bba" }}
+        style={{ color: "#c7d2e0" }}
       >
         {interpretation}
       </p>
-      {/* Top contributors — pinned to the bottom so cards align */}
-      {contributors.length > 0 && (
+      {/* Top contributors — pinned to the bottom so cards align. Hidden
+          when every per-drug contribution is zero (the all-zero contributor
+          list adds visual noise without adding information). */}
+      {contributors.length > 0 && contributors.some((c: any) => (c?.contribution ?? 0) !== 0) && (
         <div className="mt-auto pt-2 space-y-0.5">
           {contributors.slice(0, 3).map((c: any, i: number) => (
             <div
               key={i}
               className="flex items-center justify-between text-[10px]"
             >
-              <span style={{ color: "#94a8c8" }}>{c.drug_name}</span>
-              <span className="font-mono" style={{ color }}>
+              <span style={{ color: "#c7d2e0" }}>{c.drug_name}</span>
+              <span className="font-mono font-semibold" style={{ color }}>
                 +{c.contribution?.toFixed(1) ?? "?"}
               </span>
             </div>

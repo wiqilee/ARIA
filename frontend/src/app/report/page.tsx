@@ -66,19 +66,72 @@ function formatJakartaTime(date?: Date): string {
 }
 
 // ── Risk helpers ──────────────────────────────────────────
+// These mirror `src/lib/severity.ts` exactly. Do NOT diverge — every
+// surface (this page, the InteractionCard, the SeverityMeter, the
+// exported HTML/PDF, the Prompt Opinion artifact via the Python agent)
+// must agree on score → color → label or the user sees mismatches like
+// "10.0 / 10 CRITICAL" tagged as MODERATE in amber.
 const SEVERITY_COLORS: Record<string, string> = {
-  low: "#10b981", moderate: "#f59e0b", high: "#f97316", critical: "#ef4444",
+  low: "#10b981", moderate: "#f59e0b", high: "#ef4444", critical: "#ff0040",
 };
 
-function getRiskLevel(score: string | undefined) {
-  const s = (score ?? "moderate").toLowerCase();
-  const map: Record<string, { label: string; color: string; description: string; bgColor: string }> = {
-    low: { label: "LOW RISK", color: "#10b981", bgColor: "rgba(16,185,129,0.08)", description: "Minimal clinical concern. Standard monitoring protocols are adequate." },
-    moderate: { label: "MODERATE RISK", color: "#f59e0b", bgColor: "rgba(245,158,11,0.08)", description: "Enhanced monitoring recommended. Consider dose adjustments or alternative therapies if risk factors change." },
-    high: { label: "HIGH RISK", color: "#f97316", bgColor: "rgba(249,115,22,0.08)", description: "Significant clinical concern. Active intervention recommended. Prioritize deprescribing high-risk combinations." },
-    critical: { label: "CRITICAL RISK", color: "#ef4444", bgColor: "rgba(239,68,68,0.08)", description: "Immediate intervention required. High probability of severe adverse drug events without prompt action." },
+// Map a (clamped) numeric 0–10 score to the canonical risk band. Same
+// thresholds as `severity.ts`. Used by the Overall Risk Assessment card,
+// the HTML/PDF export, and the Patient Summary quick stats. Returning a
+// rich object rather than just a label so colors / bg / interpretation
+// stay co-located and can't drift.
+function getRiskLevelFromScore(score: number): {
+  label: string;
+  level: "low" | "moderate" | "high" | "critical";
+  color: string;
+  bgColor: string;
+  description: string;
+} {
+  const s = Number.isFinite(score) ? Math.max(0, Math.min(10, score)) : 0;
+  if (s >= 8.5) return {
+    label: "CRITICAL RISK",
+    level: "critical",
+    color: "#ff0040",
+    bgColor: "rgba(255,0,64,0.08)",
+    description: "Immediate intervention required. High probability of severe adverse drug events without prompt action.",
   };
-  return map[s] ?? { label: s.toUpperCase(), color: "#f59e0b", bgColor: "rgba(245,158,11,0.08)", description: "Risk level assessed by ARIA." };
+  if (s >= 5.0) return {
+    label: "HIGH RISK",
+    level: "high",
+    color: "#ef4444",
+    bgColor: "rgba(239,68,68,0.08)",
+    description: "Significant clinical concern. Active intervention, deprescribing, or substitution strongly advised.",
+  };
+  if (s >= 2.0) return {
+    label: "MODERATE RISK",
+    level: "moderate",
+    color: "#f59e0b",
+    bgColor: "rgba(245,158,11,0.08)",
+    description: "Enhanced monitoring recommended. Consider dose adjustments or alternative therapies if risk factors change.",
+  };
+  return {
+    label: "LOW RISK",
+    level: "low",
+    color: "#10b981",
+    bgColor: "rgba(16,185,129,0.08)",
+    description: "Minimal clinical concern. Standard monitoring protocols are adequate.",
+  };
+}
+
+// Legacy string-based wrapper kept so older call sites (e.g. fallback
+// paths that only have a label string) still work. It now goes through
+// the numeric helper to guarantee the same color/threshold mapping.
+function getRiskLevel(level: string | undefined) {
+  const s = (level ?? "moderate").toLowerCase();
+  // String level → band midpoint score, then back through the numeric
+  // mapper. Mid-band scores are chosen so a stringified label round-trips
+  // to its own band.
+  const fallbackScore =
+    s === "critical" ? 9.25 :
+    s === "high" ? 6.75 :
+    s === "moderate" ? 3.5 :
+    s === "low" ? 1.0 : 3.5;
+  return getRiskLevelFromScore(fallbackScore);
 }
 
 function getNumericRiskScore(
@@ -86,14 +139,25 @@ function getNumericRiskScore(
   graph?: InteractionGraph | null,
   request?: AnalyzeRequest | null,
 ): number {
-  // Prefer a graph-derived score if available — it reflects the actual
-  // edges/severities the user sees in the visualization. Falls back to
-  // level → number mapping when no graph is provided (e.g. PDF export).
+  // Highest priority: the agent already gave us an authoritative numeric
+  // score for the whole regimen (`overall_risk_score`, written by the
+  // Python `report_builder._enforce_overall_risk` step). Trust it before
+  // re-deriving from the graph, because the agent score already accounts
+  // for phenotype multipliers and emergent multi-drug interactions that
+  // the graph-only derivation misses.
+  const reportScore = (data.report as any)?.overall_risk_score;
+  if (typeof reportScore === "number" && Number.isFinite(reportScore)) {
+    return Math.max(0, Math.min(10, reportScore));
+  }
+  // Otherwise derive from the graph (used for demo data and any payload
+  // that ships without a numeric overall score).
   if (graph && graph.edges && graph.edges.length > 0) {
     return deriveNumericRiskFromGraph(graph, phenotypeMultiplier(request ?? null));
   }
+  // Last resort: map the string level to a band midpoint. Same midpoints
+  // as `getRiskLevel` so round-tripping stays stable.
   const level = (data.report?.overall_risk_level ?? "moderate").toLowerCase();
-  return { low: 2.5, moderate: 5.0, high: 7.5, critical: 9.0 }[level] ?? 5.0;
+  return { low: 1.0, moderate: 3.5, high: 6.75, critical: 9.25 }[level] ?? 3.5;
 }
 
 // ══════════════════════════════════════════════════════════
@@ -560,11 +624,10 @@ function generateReportHTML(data: AnalyzeResponse, request: AnalyzeRequest | nul
   const resolvedDep = hasRealPlan ? d! : getDemoDeprescribingPlan(request, resolvedGraph);
 
   const numScore = getNumericRiskScore(data, resolvedGraph, request);
-  const derivedLevel =
-    numScore >= 8.5 ? "critical" :
-    numScore >= 6.5 ? "high" :
-    numScore >= 4 ? "moderate" : "low";
-  const riskInfo = getRiskLevel(report?.overall_risk_level ?? derivedLevel);
+  // Same rule as the on-screen report: derive label + color from the
+  // *numeric* score, never from the LLM-emitted string field. See the
+  // comment in the main report block for the rationale.
+  const riskInfo = getRiskLevelFromScore(numScore);
 
   const now = formatJakartaTime();
   const patientCtx = request?.patient || { age: 0, sex: "unknown", ckd_stage: 0, hepatic_impairment: false, smoking: false, comorbidities: [], allergies: [] } as any;
@@ -736,7 +799,7 @@ function generateReportHTML(data: AnalyzeResponse, request: AnalyzeRequest | nul
   .rb .sc {
     font-size: 48px;
     font-weight: 900;
-    color: #f97316; /* bold orange score */
+    color: ${riskInfo.color}; /* color derived from the actual band, not hard-coded orange */
     line-height: 1;
     margin-bottom: 6px;
   }
@@ -785,10 +848,15 @@ function generateReportHTML(data: AnalyzeResponse, request: AnalyzeRequest | nul
     border-radius: 4px;
     border: 1px solid transparent;
   }
-  .sev-critical { color: #ef4444; border-color: #ef4444; background: rgba(239,68,68,0.1); }
-  .sev-high     { color: #f97316; border-color: #f97316; background: rgba(249,115,22,0.1); }
-  .sev-moderate { color: #f59e0b; border-color: #f59e0b; background: rgba(245,158,11,0.1); }
-  .sev-low      { color: #10b981; border-color: #10b981; background: rgba(16,185,129,0.1); }
+  /* Severity / urgency / action pill colors — kept in lockstep with
+     `frontend/lib/severity.ts` so a record exported to PDF shows the same
+     red border on a CRITICAL pair as the on-screen card did. The previous
+     mapping used orange (#f97316) for HIGH and a softer red for CRITICAL,
+     which made the PDF look one tier less urgent than the live view. */
+  .sev-critical { color: #ff0040; border-color: #ff0040; background: rgba(255,0,64,0.10); }
+  .sev-high     { color: #ef4444; border-color: #ef4444; background: rgba(239,68,68,0.10); }
+  .sev-moderate { color: #f59e0b; border-color: #f59e0b; background: rgba(245,158,11,0.10); }
+  .sev-low      { color: #10b981; border-color: #10b981; background: rgba(16,185,129,0.10); }
   .urg-immediate, .urg-high { color: #ef4444; border-color: #ef4444; background: rgba(239,68,68,0.08); }
   .urg-standard             { color: #06b6d4; border-color: #06b6d4; background: rgba(6,182,212,0.08); }
   .act-discontinue { color: #ef4444; border-color: #ef4444; background: rgba(239,68,68,0.08); }
@@ -1176,8 +1244,8 @@ function StatBox({
         el.style.boxShadow = "none";
       }}
     >
-      <span style={{ color: "#8a9bba" }} className="text-xs">{label}:</span>{" "}
-      <span className="font-mono font-bold text-xs" style={{ color: accent ?? "#eaf0fa" }}>
+      <span style={{ color: "#a3b8d0" }} className="text-xs">{label}:</span>{" "}
+      <span className="font-mono font-bold text-xs" style={{ color: accent ?? "#f1f5f9" }}>
         {String(value)}
       </span>
     </div>
@@ -1299,8 +1367,8 @@ function GraphInterpretation({ graph }: { graph: InteractionGraph | null }) {
         <StatBox label="Drugs" value={nodes.length} />
         <StatBox label="Interactions" value={edges.length} />
         <StatBox label="Density" value={`${((graph.graph_density ?? 0) * 100).toFixed(0)}%`} />
-        <StatBox label="Critical" value={crit} accent={crit > 0 ? "#ef4444" : undefined} />
-        <StatBox label="High" value={high} accent={high > 0 ? "#f97316" : undefined} />
+        <StatBox label="Critical" value={crit} accent={crit > 0 ? "#ff0040" : undefined} />
+        <StatBox label="High" value={high} accent={high > 0 ? "#ef4444" : undefined} />
         <StatBox label="Moderate" value={moderate} accent={moderate > 0 ? "#f59e0b" : undefined} />
         <StatBox label="Low" value={low} accent={low > 0 ? "#10b981" : undefined} />
         <StatBox label="Hub Drugs" value={hubs.length} accent={hubs.length > 0 ? "#7c4dff" : undefined} />
@@ -1558,16 +1626,68 @@ function DeprescribingInterpretation({ plan }: { plan: DeprescribingPlan | null 
       : "#10b981";
 
   const countBy = (action: string) => steps.filter((s) => s.action === action).length;
+  const totalReduction = plan.total_expected_risk_reduction ?? 0;
+  const warningCount = (plan.warnings ?? []).length;
 
   return (
     <InterpretPanel title="Deprescribing Interpretation">
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
-        <StatBox label="Steps" value={steps.length} />
-        <StatBox label="Total Reduction" value={`-${plan.total_expected_risk_reduction ?? 0}%`} accent="#10b981" />
-        <StatBox label="Warnings" value={(plan.warnings ?? []).length} accent={(plan.warnings ?? []).length > 0 ? "#f59e0b" : undefined} />
-        <StatBox label="Discontinue" value={countBy("discontinue")} accent={countBy("discontinue") > 0 ? "#ef4444" : undefined} />
-        <StatBox label="Substitute" value={countBy("substitute")} accent={countBy("substitute") > 0 ? "#06b6d4" : undefined} />
-        <StatBox label="Reduce" value={countBy("reduce")} accent={countBy("reduce") > 0 ? "#f59e0b" : undefined} />
+      {/* Hero callout — the single most important number in this panel is
+          the total expected risk reduction. Pulling it out into its own
+          full-width card with a green gradient + ring icon makes the panel
+          feel like a *plan* rather than a debug table, which is what the
+          UI was reading as before (all stats in the same gray grid). */}
+      {steps.length > 0 && (
+        <div
+          className="relative overflow-hidden rounded-lg p-3 mb-2"
+          style={{
+            background: "linear-gradient(135deg, rgba(16,185,129,0.18) 0%, rgba(6,182,212,0.08) 100%)",
+            border: "1px solid rgba(16,185,129,0.35)",
+            boxShadow: "0 0 24px rgba(16,185,129,0.12), inset 0 1px 0 rgba(255,255,255,0.04)",
+          }}
+        >
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-[10px] uppercase tracking-widest font-semibold mb-0.5"
+                   style={{ color: "#86efac", letterSpacing: "0.16em" }}>
+                Projected impact
+              </div>
+              <div className="font-display font-bold text-lg leading-tight" style={{ color: "#ecfdf5" }}>
+                {steps.length}-step plan · −{totalReduction}% risk
+              </div>
+            </div>
+            <div
+              className="font-display font-bold shrink-0 text-2xl"
+              style={{
+                color: "#10b981",
+                textShadow: "0 0 16px rgba(16,185,129,0.55)",
+              }}
+            >
+              −{totalReduction}%
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Action breakdown — 3 colored chips, each only highlighting when its
+          count > 0 so an action-less plan stays quiet. Brighter labels than
+          the old StatBox grid because Steps / Total Reduction / Warnings
+          were getting lost in low-contrast gray. */}
+      <div className="grid grid-cols-3 gap-1.5">
+        <StatBox
+          label="Discontinue"
+          value={countBy("discontinue")}
+          accent={countBy("discontinue") > 0 ? "#ef4444" : undefined}
+        />
+        <StatBox
+          label="Substitute"
+          value={countBy("substitute")}
+          accent={countBy("substitute") > 0 ? "#06b6d4" : undefined}
+        />
+        <StatBox
+          label="Reduce"
+          value={countBy("reduce")}
+          accent={countBy("reduce") > 0 ? "#f59e0b" : undefined}
+        />
       </div>
 
       {steps.length > 0 && (
@@ -1586,11 +1706,14 @@ function DeprescribingInterpretation({ plan }: { plan: DeprescribingPlan | null 
                 labelContent={
                   <div className="flex items-center gap-2 min-w-0">
                     <span className="font-mono font-bold shrink-0" style={{ color: ac }}>#{s.priority}</span>
-                    <span style={{ color: "#eaf0fa" }} className="font-medium truncate">{s.drug}</span>
+                    <span style={{ color: "#f1f5f9" }} className="font-semibold truncate">{s.drug}</span>
                     {s.substitute && (
-                      <span style={{ color: "#94a8c8" }} className="text-[10px] truncate">
-                        → {s.substitute}
-                      </span>
+                      <>
+                        <span style={{ color: "#06b6d4" }} className="text-[11px] shrink-0 font-mono">→</span>
+                        <span style={{ color: "#7dd3fc" }} className="text-[11px] truncate font-medium">
+                          {s.substitute}
+                        </span>
+                      </>
                     )}
                   </div>
                 }
@@ -1601,13 +1724,13 @@ function DeprescribingInterpretation({ plan }: { plan: DeprescribingPlan | null 
                       style={{
                         color: ac,
                         background: `${ac}1c`,
-                        border: `1px solid ${ac}33`,
+                        border: `1px solid ${ac}55`,
                       }}
                     >
                       {s.action}
                     </span>
                     <span className="font-mono font-bold text-xs" style={{ color: "#10b981" }}>
-                      -{s.expected_risk_reduction}%
+                      −{s.expected_risk_reduction}%
                     </span>
                   </div>
                 }
@@ -1621,26 +1744,26 @@ function DeprescribingInterpretation({ plan }: { plan: DeprescribingPlan | null 
         <p
           className="text-xs mt-3 p-3 rounded-lg leading-relaxed"
           style={{
-            color: "#cbd5e1",
-            background: "rgba(6,182,212,0.05)",
-            border: "1px solid rgba(6,182,212,0.12)",
+            color: "#e2e8f0",
+            background: "rgba(6,182,212,0.06)",
+            border: "1px solid rgba(6,182,212,0.22)",
           }}
         >
           {plan.summary}
         </p>
       )}
 
-      {(plan.warnings ?? []).length > 0 && (
+      {warningCount > 0 && (
         <InfoTable
           accent="#f59e0b"
-          headerLeft={`⚠ Clinical warning${plan.warnings!.length > 1 ? "s" : ""}`}
+          headerLeft={`⚠ Clinical warning${warningCount > 1 ? "s" : ""}`}
         >
           {plan.warnings!.map((w, i) => (
             <InfoRow
               key={i}
               index={i}
               accentColor="#f59e0b"
-              labelContent={<span style={{ color: "#fbbf24" }}>{w}</span>}
+              labelContent={<span style={{ color: "#fcd34d" }} className="font-medium">{w}</span>}
               valueContent={<span />}
             />
           ))}
@@ -1813,15 +1936,16 @@ export default function ReportPage() {
 
   const errors = data.errors ?? [];
   const medCount = data.report?.medication_count ?? 0;
-  // Compute numScore first, then derive the band label/color from it so
-  // the big number, the colored banner, and the Score Scale Reference
-  // highlight are always in agreement.
+  // Compute numScore first, then derive everything (label, color, scale-
+  // reference highlight) from it. We DELIBERATELY ignore the LLM-emitted
+  // `overall_risk_level` string here: that field has been observed to
+  // disagree with the numeric score (e.g. score 8.6 labelled "MODERATE"),
+  // and the report layer should never show such a contradiction. The
+  // Python agent already overrides `overall_risk_level` to match the
+  // numeric score, but we double-check here so the UI is self-consistent
+  // even if a future regression sneaks past the agent.
   const numScore = getNumericRiskScore(data, effectiveGraph, request);
-  const derivedLevel =
-    numScore >= 8.5 ? "critical" :
-    numScore >= 6.5 ? "high" :
-    numScore >= 4 ? "moderate" : "low";
-  const riskInfo = getRiskLevel(data.report?.overall_risk_level ?? derivedLevel);
+  const riskInfo = getRiskLevelFromScore(numScore);
   const patientCtx = request?.patient || {
     age: 50, sex: "unknown", ckd_stage: 0, hepatic_impairment: false,
     smoking: false, alcohol_use: "none", comorbidities: [], allergies: [],
@@ -2111,22 +2235,22 @@ export default function ReportPage() {
                     </span>
                   </div>
                   {deprescribingClick.step.substitute && (
-                    <p className="text-[11px] mb-2" style={{ color: "#cbd5e1" }}>
-                      <span style={{ color: "#7a8ba8" }}>→ Substitute: </span>
-                      <span className="font-medium" style={{ color: "#eaf0fa" }}>{deprescribingClick.step.substitute}</span>
+                    <p className="text-[11px] mb-2" style={{ color: "#e2e8f0" }}>
+                      <span style={{ color: "#06b6d4", fontWeight: 600 }}>→ Substitute: </span>
+                      <span className="font-semibold" style={{ color: "#7dd3fc" }}>{deprescribingClick.step.substitute}</span>
                     </p>
                   )}
-                  <p className="text-[11px] leading-relaxed mb-2" style={{ color: "#cbd5e1" }}>
+                  <p className="text-[11px] leading-relaxed mb-2" style={{ color: "#e2e8f0" }}>
                     {deprescribingClick.step.rationale}
                   </p>
                   <div className="text-[10px] space-y-1">
-                    <p style={{ color: "#94a8c8" }}>
-                      <span className="font-bold" style={{ color: "#eaf0fa" }}>Timeline: </span>
+                    <p style={{ color: "#c7d2e0" }}>
+                      <span className="font-bold" style={{ color: "#f1f5f9" }}>Timeline: </span>
                       {deprescribingClick.step.timeline ?? "N/A"}
                     </p>
                     {(deprescribingClick.step.monitoring ?? []).length > 0 && (
-                      <p style={{ color: "#94a8c8" }}>
-                        <span className="font-bold" style={{ color: "#eaf0fa" }}>Monitoring: </span>
+                      <p style={{ color: "#c7d2e0" }}>
+                        <span className="font-bold" style={{ color: "#f1f5f9" }}>Monitoring: </span>
                         {deprescribingClick.step.monitoring.join(", ")}
                       </p>
                     )}
@@ -2171,20 +2295,27 @@ export default function ReportPage() {
               <div className="rounded-lg p-3 text-xs leading-relaxed mb-2" style={{ background: riskInfo.bgColor, border: `1px solid ${riskInfo.color}22`, color: "#d0daea" }}>
                 <span className="font-semibold" style={{ color: riskInfo.color }}>Interpretation:</span> {riskInfo.description}
               </div>
-              {/* Per-score clinical context */}
+              {/* Per-score clinical context.
+                  Bands are the canonical four severity tiers from
+                  `lib/severity.ts` — anything else (5-band, 3-band, etc.)
+                  would visually contradict the big colored label above
+                  and the InteractionCard pills below. The active row is
+                  picked by literal band containment, so an 8.6 lights up
+                  the CRITICAL row (8.5–10.0), never the HIGH row. */}
               <div className="rounded-lg p-3 text-[11px] leading-relaxed space-y-1" style={{ background: "rgba(8,20,37,0.5)", border: "1px solid rgba(0,229,255,0.07)" }}>
                 <p style={{ color: "#7a8ba8" }} className="font-semibold mb-1.5">Score Scale Reference:</p>
                 {[
-                  { range: "0–2", label: "Low", color: "#10b981", desc: "Minimal risk. Routine monitoring sufficient. No immediate intervention needed." },
-                  { range: "3–4", label: "Moderate-Low", color: "#22d3ee", desc: "Mild concern. Standard clinical vigilance; re-evaluate if patient status changes." },
-                  { range: "5–6", label: "Moderate", color: "#f59e0b", desc: "Clinically relevant. Enhanced monitoring and dose review recommended." },
-                  { range: "7–8", label: "High", color: "#f97316", desc: "Significant danger. Active intervention, deprescribing, or substitution strongly advised." },
-                  { range: "9–10", label: "Critical", color: "#ef4444", desc: "Immediate action required. High probability of severe adverse events without prompt change." },
+                  { range: "0.0–2.0", min: 0.0, max: 2.0, label: "Low",      color: "#10b981", desc: "Minimal risk. Routine monitoring sufficient. No immediate intervention needed." },
+                  { range: "2.0–5.0", min: 2.0, max: 5.0, label: "Moderate", color: "#f59e0b", desc: "Enhanced monitoring recommended. Consider dose adjustments or alternative therapies if risk factors change." },
+                  { range: "5.0–8.5", min: 5.0, max: 8.5, label: "High",     color: "#ef4444", desc: "Significant danger. Active intervention, deprescribing, or substitution strongly advised." },
+                  { range: "8.5–10",  min: 8.5, max: 10.0, label: "Critical", color: "#ff0040", desc: "Immediate action required. High probability of severe adverse events without prompt change." },
                 ].map((s, i) => {
-                  const low = parseFloat(s.range.split("–")[0]);
-                  const high = parseFloat(s.range.split("–")[1]);
-                  // The row whose range contains numScore is the "active" one.
-                  const isActive = numScore >= low && numScore <= high + 0.9;
+                  // Band containment: `[min, max)` for the lower three,
+                  // `[8.5, 10]` for the top band. Matches `severity.ts`.
+                  const isActive =
+                    s.max === 10.0
+                      ? numScore >= s.min && numScore <= s.max
+                      : numScore >= s.min && numScore < s.max;
                   return (
                     <div
                       key={i}
@@ -2218,7 +2349,7 @@ export default function ReportPage() {
                       }}
                     >
                       <span
-                        className="font-mono font-bold shrink-0 w-10"
+                        className="font-mono font-bold shrink-0 w-12"
                         style={{ color: s.color }}
                       >
                         {s.range}
@@ -2317,7 +2448,7 @@ export default function ReportPage() {
                     {[
                       { label: "Interactions", value: totalInteractions, bg: "rgba(6,182,212,0.06)", border: "rgba(6,182,212,0.15)", color: "#eaf0fa", hoverBg: "rgba(6,182,212,0.12)" },
                       { label: "Risk", value: `${numScore.toFixed(1)}/10`, bg: riskInfo.bgColor, border: `${riskInfo.color}22`, color: riskInfo.color, hoverBg: `${riskInfo.color}18` },
-                      { label: "Critical", value: (effectiveGraph?.edges ?? []).filter(e => e.severity === "critical").length, bg: "rgba(239,68,68,0.06)", border: "rgba(239,68,68,0.15)", color: "#ef4444", hoverBg: "rgba(239,68,68,0.12)" },
+                      { label: "Critical", value: (effectiveGraph?.edges ?? []).filter(e => e.severity === "critical").length, bg: "rgba(255,0,64,0.06)", border: "rgba(255,0,64,0.18)", color: "#ff0040", hoverBg: "rgba(255,0,64,0.14)" },
                       { label: "Deprescribe", value: `${(effectiveDeprescribing?.steps ?? []).length} steps`, bg: "rgba(16,185,129,0.06)", border: "rgba(16,185,129,0.15)", color: "#10b981", hoverBg: "rgba(16,185,129,0.12)" },
                     ].map((stat, i) => (
                       <div key={i} className="px-2 py-1 rounded"
@@ -2407,8 +2538,8 @@ function buildPatientSummary(
   const high = edges.filter((e) => e.severity === "high").length;
   if (edges.length > 0) {
     bullets.push({ label: "Interactions identified", value: String(edges.length), color: "#06b6d4" });
-    if (crit > 0) bullets.push({ label: "Critical severity", value: String(crit), color: "#ef4444" });
-    if (high > 0) bullets.push({ label: "High severity", value: String(high), color: "#f97316" });
+    if (crit > 0) bullets.push({ label: "Critical severity", value: String(crit), color: "#ff0040" });
+    if (high > 0) bullets.push({ label: "High severity", value: String(high), color: "#ef4444" });
   }
 
   if (temporal && (temporal.peak_risk_score ?? 0) > 0) {

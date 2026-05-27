@@ -84,11 +84,11 @@ export function DeprescribingWaterfall({
       />
       <group ref={groupRef}>
         {/* Title */}
-        <Text position={[0, startY + 0.7, 0]} fontSize={0.3} color="#f1f5f9" anchorX="center" fontWeight="bold"
+        <Text position={[0, startY + 0.7, 0]} fontSize={0.3} color="#f8fafc" anchorX="center" fontWeight="bold"
           outlineWidth={0.012} outlineColor="#020817">
           Deprescribing Plan
         </Text>
-        <Text position={[0, startY + 0.35, 0]} fontSize={0.14} color="#cbd5e1" anchorX="center"
+        <Text position={[0, startY + 0.35, 0]} fontSize={0.14} color="#e2e8f0" anchorX="center"
           outlineWidth={0.008} outlineColor="#020817">
           Ordered by clinical priority — {steps.length} step{steps.length > 1 ? "s" : ""}
         </Text>
@@ -173,7 +173,7 @@ export function DeprescribingWaterfall({
 
             {/* Substitute info (smaller, below the bar) */}
             {stepProgress > 0.9 && step.substitute && (
-              <Text position={[-maxWidth / 2 + 0.05, y - barHeight * 0.55, 0]} fontSize={0.13} color="#94a8c8" anchorX="left" anchorY="top"
+              <Text position={[-maxWidth / 2 + 0.05, y - barHeight * 0.55, 0]} fontSize={0.13} color="#7dd3fc" anchorX="left" anchorY="top"
                 outlineWidth={0.008} outlineColor="#020817">
                 {`→ ${step.substitute}`}
               </Text>

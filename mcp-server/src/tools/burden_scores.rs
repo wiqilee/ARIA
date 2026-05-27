@@ -85,9 +85,15 @@ pub async fn compute_burden_scores(
 /// qt_prolongation_risk) out of the parsed root, with a clearly-labelled
 /// fallback so the UI can tell the difference between "we computed this
 /// and it really is low" vs "we tried to compute and failed".
+///
+/// Any numeric fields read here are clamped to a defensive [0.0, 100.0]
+/// burden range — burden scores are not on the same 0–10 scale as
+/// interaction risk scores, but they should still be finite and
+/// non-negative. An LLM emitting `NaN` or `-3.2` is always a bug.
 fn extract_bucket(root: &serde_json::Value, key: &str) -> crate::models::BurdenDetail {
-    root.get(key)
-        .and_then(|b| serde_json::from_value(b.clone()).ok())
+    let mut detail = root
+        .get(key)
+        .and_then(|b| serde_json::from_value::<crate::models::BurdenDetail>(b.clone()).ok())
         .unwrap_or_else(|| crate::models::BurdenDetail {
             total_score: 0.0,
             // "unknown" — not "low" — so a downstream consumer that cares
@@ -100,7 +106,20 @@ fn extract_bucket(root: &serde_json::Value, key: &str) -> crate::models::BurdenD
                 "Unable to compute {} (parser fallback fired)",
                 key.replace('_', " ")
             ),
-        })
+        });
+
+    // Sanitize numeric fields. Negative scores, NaN, and inf were observed
+    // sneaking through when the LLM emitted "n/a" or formatted scores as
+    // percentages. Clamp once at the boundary so the frontend doesn't
+    // have to defend against bad numbers in three different cards.
+    if !detail.total_score.is_finite() || detail.total_score < 0.0 {
+        detail.total_score = 0.0;
+    }
+    if detail.total_score > 100.0 {
+        detail.total_score = 100.0;
+    }
+
+    detail
 }
 
 /// Best-effort JSON extraction from an LLM completion.

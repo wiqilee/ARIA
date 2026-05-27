@@ -33,6 +33,24 @@ pub fn severity_label_for_score(score: f64) -> &'static str {
     }
 }
 
+/// Clamp any incoming score to the canonical 0.0-10.0 range.
+///
+/// Defensive helper for LLM-emitted numeric fields. Gemini has been observed
+/// to occasionally:
+///   - emit a score on the wrong scale (e.g. 95.0 if it treats the metric as
+///     a percentage, or 1.0 if it treats it as a fraction),
+///   - sum per-pair severities instead of returning the max (the cause of
+///     the "15.3 / 10" output that surfaced in the Prompt Opinion artifact),
+///   - emit NaN / null / "n/a" on prompt failure.
+/// Every downstream consumer assumes the value is bounded, so we clamp at
+/// the boundary between LLM output and the structured response.
+fn clamp_score(value: f64) -> f64 {
+    if !value.is_finite() {
+        return 0.0;
+    }
+    value.clamp(0.0, 10.0)
+}
+
 /// Calculate a personalized risk score adjusted for patient phenotype.
 pub async fn score_risk(
     interaction: &Interaction,
@@ -70,8 +88,31 @@ pub async fn score_risk(
         })
     });
 
-    let adjusted_score = parsed.get("adjusted_score").and_then(|s| s.as_f64()).unwrap_or(5.0);
-    let base_score = parsed.get("base_score").and_then(|s| s.as_f64()).unwrap_or(5.0);
+    // Extract raw values, then clamp into [0, 10]. The raw (un-clamped)
+    // values are logged when they fall outside the band so we can audit
+    // prompt regressions without losing the diagnostic data.
+    let raw_adjusted = parsed.get("adjusted_score").and_then(|s| s.as_f64()).unwrap_or(5.0);
+    let raw_base = parsed.get("base_score").and_then(|s| s.as_f64()).unwrap_or(5.0);
+
+    let adjusted_score = clamp_score(raw_adjusted);
+    let base_score = clamp_score(raw_base);
+
+    if raw_adjusted.is_finite() && raw_adjusted != adjusted_score {
+        tracing::warn!(
+            interaction_id = %interaction.id,
+            raw_adjusted_score = raw_adjusted,
+            clamped = adjusted_score,
+            "LLM returned out-of-range adjusted_score; clamping to [0, 10]"
+        );
+    }
+    if raw_base.is_finite() && raw_base != base_score {
+        tracing::warn!(
+            interaction_id = %interaction.id,
+            raw_base_score = raw_base,
+            clamped = base_score,
+            "LLM returned out-of-range base_score; clamping to [0, 10]"
+        );
+    }
 
     // Deterministic severity label — never trust the LLM for this.
     let severity_label = severity_label_for_score(adjusted_score);
@@ -113,7 +154,7 @@ pub async fn score_risk(
 
 #[cfg(test)]
 mod tests {
-    use super::severity_label_for_score;
+    use super::{clamp_score, severity_label_for_score};
 
     #[test]
     fn severity_thresholds_match_readme_examples() {
@@ -136,5 +177,22 @@ mod tests {
         assert_eq!(severity_label_for_score(-1.0), "LOW");
         assert_eq!(severity_label_for_score(15.0), "CRITICAL");
         assert_eq!(severity_label_for_score(f64::NAN), "LOW");
+    }
+
+    #[test]
+    fn clamp_handles_out_of_range_inputs() {
+        // Valid range — passes through unchanged.
+        assert_eq!(clamp_score(0.0), 0.0);
+        assert_eq!(clamp_score(5.5), 5.5);
+        assert_eq!(clamp_score(10.0), 10.0);
+        // Above range — pulled down to the ceiling.
+        assert_eq!(clamp_score(15.3), 10.0); // the exact value seen in production
+        assert_eq!(clamp_score(95.0), 10.0); // LLM-emitted percentage
+        // Below range — pulled up to the floor.
+        assert_eq!(clamp_score(-1.0), 0.0);
+        // Non-finite — collapsed to floor.
+        assert_eq!(clamp_score(f64::NAN), 0.0);
+        assert_eq!(clamp_score(f64::INFINITY), 0.0);
+        assert_eq!(clamp_score(f64::NEG_INFINITY), 0.0);
     }
 }

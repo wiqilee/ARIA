@@ -4,14 +4,14 @@ import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { EvidenceBadge } from "./EvidenceBadge";
 import { SeverityMeter } from "./SeverityMeter";
+import {
+  clampScore,
+  getSeverityColor,
+  getSeverityLabel,
+  scoreFromLabel,
+  type SeverityLabel,
+} from "@/lib/severity";
 import type { Interaction, RiskScore } from "@/lib/types";
-
-const SEVERITY_COLORS: Record<string, string> = {
-  low: "#10b981",
-  moderate: "#f59e0b",
-  high: "#ef4444",
-  critical: "#ff0040",
-};
 
 interface InteractionCardProps {
   interaction: Interaction;
@@ -26,7 +26,23 @@ export function InteractionCard({
 }: InteractionCardProps) {
   const [expanded, setExpanded] = useState(false);
   const [hovered, setHovered] = useState(false);
-  const color = SEVERITY_COLORS[interaction.severity] || "#64748b";
+
+  // ── Source of truth for severity ────────────────────────────────────
+  // When a numeric riskScore is available, ALWAYS derive the label and
+  // color from it via the shared `severity.ts` mapping. The string
+  // `interaction.severity` field comes from the LLM and has been observed
+  // to disagree with the numeric score (e.g. score 10.0 tagged "MODERATE"
+  // in earlier builds, which produced the "CRITICAL bar + amber pill"
+  // visual mismatch in the report). The deterministic mapping wins.
+  //
+  // When no riskScore is present (graph-only payloads, fallback paths)
+  // we map the string severity back to a band midpoint so the same
+  // mapping function still drives the color/label.
+  const numericScore = clampScore(
+    riskScore?.adjusted_score ?? scoreFromLabel(interaction.severity),
+  );
+  const derivedLabel: SeverityLabel = getSeverityLabel(numericScore);
+  const color = getSeverityColor(numericScore);
 
   // Derive a few colour shades from the severity colour so every visual
   // accent (left bar, badge, pill, glow) stays in the same family.
@@ -124,7 +140,11 @@ export function InteractionCard({
             {interaction.description}
           </p>
 
-          {/* Badges row */}
+          {/* Badges row.
+              The severity pill now uses the DETERMINISTIC label derived
+              from the numeric score, not the LLM-provided string. This
+              was the source of the "10.0 / CRITICAL bar + MODERATE pill"
+              mismatch observed in the report. */}
           <div className="flex items-center gap-3 mt-3 flex-wrap">
             <span
               className="text-[10px] font-semibold uppercase tracking-widest px-2 py-1 rounded"
@@ -135,7 +155,7 @@ export function InteractionCard({
                 letterSpacing: "0.12em",
               }}
             >
-              {interaction.severity}
+              {derivedLabel}
             </span>
 
             <span
@@ -182,10 +202,21 @@ export function InteractionCard({
           </div>
         </div>
 
-        {/* Risk score */}
+        {/* Risk score — narrower container (`w-14` ≈ 56px) so the
+            "9.4 / 10" pair fits cleanly without crowding the Details
+            pill that sits to its right. The inline severity label that
+            used to live in this meter (causing the "CRIT" / "DETAILS"
+            text overlap reported in production) is now suppressed by
+            default at size="sm" — see SeverityMeter.tsx. The label is
+            shown instead as the colored badge inside the .Badges row,
+            which has plenty of horizontal space. */}
         {riskScore && (
-          <div className="flex-shrink-0 w-16">
-            <SeverityMeter value={riskScore.adjusted_score} size="sm" />
+          <div className="flex-shrink-0 w-14">
+            <SeverityMeter
+              value={riskScore.adjusted_score}
+              size="sm"
+              showSeverityLabel={false}
+            />
           </div>
         )}
 
@@ -193,7 +224,7 @@ export function InteractionCard({
             This is the primary cue that the card expands. Severity-coloured
             so it reads as part of the card's identity. Animates rotation +
             label change between collapsed/expanded states.
-            `ml-2` adds breathing room between the SeverityMeter and the
+            `ml-3` adds breathing room between the SeverityMeter and the
             pill so the score isn't visually crushed against it. */}
         <motion.div
           animate={{
@@ -201,7 +232,7 @@ export function InteractionCard({
             borderColor: hovered || expanded ? tintBorderStrong : "rgba(0, 229, 255, 0.12)",
           }}
           transition={{ duration: 0.3 }}
-          className="flex items-center gap-1.5 flex-shrink-0 px-2.5 py-1 rounded-md mt-0.5 ml-4"
+          className="flex items-center gap-1.5 flex-shrink-0 px-2.5 py-1 rounded-md mt-0.5 ml-3"
           style={{
             border: "1px solid",
             fontFamily: "var(--font-mono, ui-monospace)",
