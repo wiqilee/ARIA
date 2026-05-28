@@ -849,7 +849,7 @@ function generateReportHTML(data: AnalyzeResponse, request: AnalyzeRequest | nul
     border: 1px solid transparent;
   }
   /* Severity / urgency / action pill colors — kept in lockstep with
-     `frontend/lib/severity.ts` so a record exported to PDF shows the same
+     'frontend/lib/severity.ts' so a record exported to PDF shows the same
      red border on a CRITICAL pair as the on-screen card did. The previous
      mapping used orange (#f97316) for HIGH and a softer red for CRITICAL,
      which made the PDF look one tier less urgent than the live view. */
