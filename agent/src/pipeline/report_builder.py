@@ -57,15 +57,37 @@ def _enforce_overall_risk(report: dict, overall_risk: dict | None) -> dict:
     if not isinstance(report, dict):
         return report
 
-    if overall_risk:
+    if overall_risk and "score" in overall_risk:
         score = _clamp_score(overall_risk.get("score"))
-        label = (overall_risk.get("severity_label") or _severity_label_for_score(score)).upper()
     else:
         # No agent-side computation available — fall back to whatever the
-        # MCP report said, but still clamp and re-derive the label from
-        # the (clamped) numeric score so the two fields agree.
+        # MCP report said, but still clamp to [0, 10].
         score = _clamp_score(report.get("overall_risk_score"))
-        label = _severity_label_for_score(score)
+
+    # ALWAYS derive the label from the (clamped) numeric score. The
+    # upstream `overall_risk.severity_label` and the MCP report's
+    # `overall_risk_level` are observational only — both have been seen
+    # disagreeing with the number (e.g. score=10.0 emitted with
+    # severity_label="LOW", showing up in Prompt Opinion as
+    # "Risk score: 10.0 / 10 • Level: LOW"). Re-derivation here is the
+    # single fix that guarantees number and label always agree on every
+    # surface (Vercel UI, A2A artifact, PDF).
+    label = _severity_label_for_score(score)
+
+    # Log (do not propagate) when the upstream agent label disagreed.
+    # Useful for spotting bugs in `phenotype_scorer.py` that would
+    # otherwise be silently masked by the re-derivation above.
+    if overall_risk and overall_risk.get("severity_label"):
+        upstream_lbl = str(overall_risk.get("severity_label")).upper()
+        if upstream_lbl != label:
+            logger.warning(
+                "Discarding upstream overall_risk.severity_label %r — "
+                "does not match numeric score %.2f (expected %r). "
+                "Check phenotype_scorer.",
+                overall_risk.get("severity_label"),
+                score,
+                label,
+            )
 
     # Stash any prior MCP-emitted values so they're not silently lost.
     if "overall_risk_score" in report and report["overall_risk_score"] != score:

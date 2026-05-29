@@ -22,7 +22,27 @@ export function DeprescribingStep({ step, index }: DeprescribingStepProps) {
       initial={{ opacity: 0, x: -20 }}
       animate={{ opacity: 1, x: 0 }}
       transition={{ duration: 0.4, delay: index * 0.1 }}
-      className="flex gap-4 p-4 rounded-xl bg-surface/40 border border-border glow-border"
+      className="flex gap-4 p-4 rounded-xl transition-all"
+      style={{
+        // Each card gets a visible, action-tinted border + a strong colored
+        // left edge so aspirin / digoxin / omeprazole are obviously
+        // separate blocks instead of bleeding into one another. Previously
+        // the card used `bg-surface/40 border-border` which rendered the
+        // border at ~#1e3a5f against a near-black bg — effectively
+        // invisible.
+        background: "rgba(15, 23, 42, 0.55)",
+        border: `1px solid ${style.color}40`,
+        borderLeft: `3px solid ${style.color}`,
+        boxShadow: `0 0 0 1px ${style.color}10`,
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.borderColor = `${style.color}80`;
+        e.currentTarget.style.boxShadow = `0 0 14px ${style.color}22`;
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.borderColor = `${style.color}40`;
+        e.currentTarget.style.boxShadow = `0 0 0 1px ${style.color}10`;
+      }}
     >
       {/* Priority number */}
       <div className="flex-shrink-0 flex flex-col items-center">
@@ -33,13 +53,13 @@ export function DeprescribingStep({ step, index }: DeprescribingStepProps) {
           {step.priority}
         </div>
         {/* Vertical connector line */}
-        <div className="w-px flex-1 mt-2 bg-border/50" />
+        <div className="w-px flex-1 mt-2" style={{ background: "rgba(30, 58, 95, 0.6)" }} />
       </div>
 
       {/* Content */}
       <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 mb-1">
-          <span className="font-mono text-sm text-text-primary font-semibold">
+        <div className="flex items-center gap-2 mb-1.5">
+          <span className="font-mono text-sm font-semibold" style={{ color: "#f1f5f9" }}>
             {step.drug}
           </span>
           <span
@@ -51,23 +71,33 @@ export function DeprescribingStep({ step, index }: DeprescribingStepProps) {
         </div>
 
         {step.substitute && (
-          <div className="text-sm text-text-secondary mb-1">
+          <div className="text-sm mb-1.5" style={{ color: "#cbd5e1" }}>
             Substitute with:{" "}
-            <span className="font-mono text-primary">{step.substitute}</span>
+            <span className="font-mono" style={{ color: "#7dd3fc" }}>
+              {step.substitute}
+            </span>
           </div>
         )}
 
-        <p className="text-text-muted text-xs leading-relaxed mb-2">
+        {/* Rationale — bumped from `text-text-muted` (≈ #64748b slate-500)
+            to slate-300 so the clinical reasoning is actually legible on
+            the dark navy bg. */}
+        <p className="text-xs leading-relaxed mb-2" style={{ color: "#cbd5e1" }}>
           {step.rationale}
         </p>
 
-        {/* Monitoring */}
+        {/* Monitoring chips — same readability bump. */}
         {step.monitoring.length > 0 && (
           <div className="flex flex-wrap gap-1.5 mb-2">
             {step.monitoring.map((m, i) => (
               <span
                 key={i}
-                className="text-[10px] font-mono text-text-muted bg-background/60 px-2 py-0.5 rounded"
+                className="text-[10px] font-mono px-2 py-0.5 rounded"
+                style={{
+                  color: "#a8b8d0",
+                  background: "rgba(2, 8, 23, 0.6)",
+                  border: "1px solid rgba(30, 58, 95, 0.6)",
+                }}
               >
                 {m}
               </span>
@@ -77,10 +107,10 @@ export function DeprescribingStep({ step, index }: DeprescribingStepProps) {
 
         {/* Footer */}
         <div className="flex items-center gap-4 text-xs">
-          <span className="text-success font-mono">
-            -{step.expected_risk_reduction.toFixed(0)}% risk
+          <span className="font-mono font-bold" style={{ color: "#10b981" }}>
+            −{step.expected_risk_reduction.toFixed(0)}% risk
           </span>
-          <span className="text-text-muted">{step.timeline}</span>
+          <span style={{ color: "#94a3b8" }}>{step.timeline}</span>
         </div>
       </div>
     </motion.div>

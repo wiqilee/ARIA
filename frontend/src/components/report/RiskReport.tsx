@@ -441,7 +441,7 @@ export function RiskReport({ data }: RiskReportProps) {
                 {deprescribing_plan.summary}
               </p>
             )}
-            <div className="space-y-3">
+            <div className="space-y-4">
               {deprescribing_plan.steps.map((step: any, i: number) => (
                 <DeprescribingStep key={i} step={step} index={i} />
               ))}

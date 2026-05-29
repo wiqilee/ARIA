@@ -39,7 +39,7 @@ export function getSeverityColor(score: number): string {
     case "CRITICAL":
       return "#ff0040"; // bright red
     case "HIGH":
-      return "#ef4444"; // red
+      return "#f97316"; // orange — distinct from CRITICAL red so HIGH and CRITICAL never look the same
     case "MODERATE":
       return "#f59e0b"; // amber
     case "LOW":
@@ -54,7 +54,7 @@ export function getSeverityBgColor(score: number): string {
     case "CRITICAL":
       return "rgba(255, 0, 64, 0.10)";
     case "HIGH":
-      return "rgba(239, 68, 68, 0.10)";
+      return "rgba(249, 115, 22, 0.10)";
     case "MODERATE":
       return "rgba(245, 158, 11, 0.10)";
     case "LOW":
@@ -112,7 +112,7 @@ export const SCORE_SCALE_REFERENCE: ReadonlyArray<{
     min: 5.0,
     max: 8.5,
     label: "HIGH",
-    color: "#ef4444",
+    color: "#f97316",
     desc: "Significant danger. Active intervention, deprescribing, or substitution strongly advised.",
   },
   {

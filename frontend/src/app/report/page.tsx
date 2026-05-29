@@ -72,7 +72,7 @@ function formatJakartaTime(date?: Date): string {
 // must agree on score → color → label or the user sees mismatches like
 // "10.0 / 10 CRITICAL" tagged as MODERATE in amber.
 const SEVERITY_COLORS: Record<string, string> = {
-  low: "#10b981", moderate: "#f59e0b", high: "#ef4444", critical: "#ff0040",
+  low: "#10b981", moderate: "#f59e0b", high: "#f97316", critical: "#ff0040",
 };
 
 // Map a (clamped) numeric 0–10 score to the canonical risk band. Same
@@ -98,8 +98,8 @@ function getRiskLevelFromScore(score: number): {
   if (s >= 5.0) return {
     label: "HIGH RISK",
     level: "high",
-    color: "#ef4444",
-    bgColor: "rgba(239,68,68,0.08)",
+    color: "#f97316",
+    bgColor: "rgba(249,115,22,0.08)",
     description: "Significant clinical concern. Active intervention, deprescribing, or substitution strongly advised.",
   };
   if (s >= 2.0) return {
@@ -850,11 +850,12 @@ function generateReportHTML(data: AnalyzeResponse, request: AnalyzeRequest | nul
   }
   /* Severity / urgency / action pill colors — kept in lockstep with
      'frontend/lib/severity.ts' so a record exported to PDF shows the same
-     red border on a CRITICAL pair as the on-screen card did. The previous
-     mapping used orange (#f97316) for HIGH and a softer red for CRITICAL,
-     which made the PDF look one tier less urgent than the live view. */
+     border colors as the on-screen card did. The 4-tier scale is
+     green → amber → orange → red so HIGH and CRITICAL are visually
+     distinct (previously both were red, which collapsed the top two
+     tiers visually in both the UI and the PDF). */
   .sev-critical { color: #ff0040; border-color: #ff0040; background: rgba(255,0,64,0.10); }
-  .sev-high     { color: #ef4444; border-color: #ef4444; background: rgba(239,68,68,0.10); }
+  .sev-high     { color: #f97316; border-color: #f97316; background: rgba(249,115,22,0.10); }
   .sev-moderate { color: #f59e0b; border-color: #f59e0b; background: rgba(245,158,11,0.10); }
   .sev-low      { color: #10b981; border-color: #10b981; background: rgba(16,185,129,0.10); }
   .urg-immediate, .urg-high { color: #ef4444; border-color: #ef4444; background: rgba(239,68,68,0.08); }
@@ -1368,7 +1369,7 @@ function GraphInterpretation({ graph }: { graph: InteractionGraph | null }) {
         <StatBox label="Interactions" value={edges.length} />
         <StatBox label="Density" value={`${((graph.graph_density ?? 0) * 100).toFixed(0)}%`} />
         <StatBox label="Critical" value={crit} accent={crit > 0 ? "#ff0040" : undefined} />
-        <StatBox label="High" value={high} accent={high > 0 ? "#ef4444" : undefined} />
+        <StatBox label="High" value={high} accent={high > 0 ? "#f97316" : undefined} />
         <StatBox label="Moderate" value={moderate} accent={moderate > 0 ? "#f59e0b" : undefined} />
         <StatBox label="Low" value={low} accent={low > 0 ? "#10b981" : undefined} />
         <StatBox label="Hub Drugs" value={hubs.length} accent={hubs.length > 0 ? "#7c4dff" : undefined} />
@@ -1463,7 +1464,10 @@ function GraphInterpretation({ graph }: { graph: InteractionGraph | null }) {
 function TimelineInterpretation({ temporal }: { temporal: CascadeModel | null }) {
   if (!temporal) return null;
   const peakScore = temporal.peak_risk_score ?? 0;
-  const peakColor = peakScore > 7 ? "#ef4444" : peakScore > 4 ? "#f59e0b" : "#06b6d4";
+  const peakColor =
+    peakScore >= 8.5 ? "#ff0040" :
+    peakScore >= 5.0 ? "#f97316" :
+    peakScore >= 2.0 ? "#f59e0b" : "#06b6d4";
   const windows = temporal.intervention_windows ?? [];
   const daily = temporal.daily_risk ?? [];
   const avgRisk = daily.length > 0
@@ -2173,8 +2177,9 @@ export default function ReportPage() {
               {activeViz === "temporal" && timelineHover && (
                 <VizSidePanel
                   accentColor={
-                    timelineHover.risk > 7 ? "#ef4444" :
-                    timelineHover.risk > 4 ? "#f59e0b" : "#06b6d4"
+                    timelineHover.risk >= 8.5 ? "#ff0040" :
+                    timelineHover.risk >= 5.0 ? "#f97316" :
+                    timelineHover.risk >= 2.0 ? "#f59e0b" : "#06b6d4"
                   }
                 >
                   <SidePanelHeader
@@ -2185,8 +2190,9 @@ export default function ReportPage() {
                   <SidePanelScore
                     value={timelineHover.risk}
                     accent={
-                      timelineHover.risk > 7 ? "#ef4444" :
-                      timelineHover.risk > 4 ? "#f59e0b" : "#06b6d4"
+                      timelineHover.risk >= 8.5 ? "#ff0040" :
+                      timelineHover.risk >= 5.0 ? "#f97316" :
+                      timelineHover.risk >= 2.0 ? "#f59e0b" : "#06b6d4"
                     }
                   />
                   {timelineHover.event && (
@@ -2289,7 +2295,7 @@ export default function ReportPage() {
               <div className="text-xs font-display font-bold tracking-widest mb-3" style={{ color: riskInfo.color }}>{riskInfo.label}</div>
               <div className="h-2 rounded-full overflow-hidden mb-3" style={{ background: "#0f172a" }}>
                 <motion.div className="h-full rounded-full" initial={{ width: 0 }} animate={{ width: `${numScore * 10}%` }}
-                  transition={{ duration: 1, ease: "easeOut", delay: 0.3 }} style={{ background: "linear-gradient(90deg,#10b981,#f59e0b,#ef4444)" }} />
+                  transition={{ duration: 1, ease: "easeOut", delay: 0.3 }} style={{ background: "linear-gradient(90deg,#10b981,#f59e0b,#f97316,#ff0040)" }} />
               </div>
               <div className="flex justify-between text-[10px] mb-3" style={{ color: "#6b7c96" }}>{[0,2,4,6,8,10].map(n=><span key={n}>{n}</span>)}</div>
               <div className="rounded-lg p-3 text-xs leading-relaxed mb-2" style={{ background: riskInfo.bgColor, border: `1px solid ${riskInfo.color}22`, color: "#d0daea" }}>
@@ -2307,7 +2313,7 @@ export default function ReportPage() {
                 {[
                   { range: "0.0–2.0", min: 0.0, max: 2.0, label: "Low",      color: "#10b981", desc: "Minimal risk. Routine monitoring sufficient. No immediate intervention needed." },
                   { range: "2.0–5.0", min: 2.0, max: 5.0, label: "Moderate", color: "#f59e0b", desc: "Enhanced monitoring recommended. Consider dose adjustments or alternative therapies if risk factors change." },
-                  { range: "5.0–8.5", min: 5.0, max: 8.5, label: "High",     color: "#ef4444", desc: "Significant danger. Active intervention, deprescribing, or substitution strongly advised." },
+                  { range: "5.0–8.5", min: 5.0, max: 8.5, label: "High",     color: "#f97316", desc: "Significant danger. Active intervention, deprescribing, or substitution strongly advised." },
                   { range: "8.5–10",  min: 8.5, max: 10.0, label: "Critical", color: "#ff0040", desc: "Immediate action required. High probability of severe adverse events without prompt change." },
                 ].map((s, i) => {
                   // Band containment: `[min, max)` for the lower three,
@@ -2539,11 +2545,14 @@ function buildPatientSummary(
   if (edges.length > 0) {
     bullets.push({ label: "Interactions identified", value: String(edges.length), color: "#06b6d4" });
     if (crit > 0) bullets.push({ label: "Critical severity", value: String(crit), color: "#ff0040" });
-    if (high > 0) bullets.push({ label: "High severity", value: String(high), color: "#ef4444" });
+    if (high > 0) bullets.push({ label: "High severity", value: String(high), color: "#f97316" });
   }
 
   if (temporal && (temporal.peak_risk_score ?? 0) > 0) {
-    const peakColor = temporal.peak_risk_score > 7 ? "#ef4444" : temporal.peak_risk_score > 4 ? "#f59e0b" : "#06b6d4";
+    const peakColor =
+      temporal.peak_risk_score >= 8.5 ? "#ff0040" :
+      temporal.peak_risk_score >= 5.0 ? "#f97316" :
+      temporal.peak_risk_score >= 2.0 ? "#f59e0b" : "#06b6d4";
     bullets.push({
       label: "Peak risk",
       value: `${temporal.peak_risk_score.toFixed(1)}/10 at day ${temporal.peak_risk_day}`,
