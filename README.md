@@ -613,7 +613,7 @@ ARIA's `0–10` risk score is mapped to a categorical label using a deterministi
 |---|---|---|
 | `0.0 – 2.0` | LOW | green `#10b981` |
 | `2.0 – 5.0` | MODERATE | amber `#f59e0b` |
-| `5.0 – 8.5` | HIGH | red `#ef4444` |
+| `5.0 – 8.5` | HIGH | orange `#f97316` |
 | `8.5 – 10.0` | CRITICAL | bright red `#ff0040` |
 
 The same mapping is implemented in three places and kept in lockstep:
