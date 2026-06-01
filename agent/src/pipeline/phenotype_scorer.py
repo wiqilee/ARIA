@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 # Single source of truth on the Python side. Mirrors `severity_label_for_score`
-# in `mcp-server/src/agent_tools/score_risk.rs` and `frontend/lib/severity.ts`.
+# in `mcp-server/src/tools/score_risk.rs` and `frontend/src/lib/severity.ts`.
 # If the MCP response already includes `severity_label`, we trust it (Rust is
 # authoritative). If not, we backfill it here so the A2A response always has
 # a label that matches the numeric score.
@@ -48,11 +48,73 @@ def _clamp_score(score: Any) -> float:
     return max(0.0, min(10.0, float(score)))
 
 
-def _normalize_severity(risk_score: dict) -> dict:
+def _as_dict(obj: Any) -> dict | None:
+    """Coerce an MCP tool result into a plain ``dict``.
+
+    THE BUG THIS FIXES: ``mcp.score_risk`` does not necessarily return a
+    plain dict. The MCP client deserialises tool I/O into the Pydantic
+    models defined in ``mcp_client/schema.py``, so a successful call yields
+    a *model instance*, not a dict. Every consumer below indexes the result
+    like a dict and guards with ``isinstance(..., dict)``. A model silently
+    fails that guard, so:
+
+      * ``_normalize_severity`` returned the object untouched (no clamp,
+        no deterministic label re-derivation), and
+      * the ``overall_risk`` aggregation filtered every model out of the
+        ``max(...)`` generator, collapsing the maximum to ``default=0.0``.
+
+    The net effect: an interaction correctly scored 10.0 contributed
+    nothing to the overall risk, which then resolved to score 0.0 → label
+    "LOW", while the artifact still displayed the per-interaction 10.0 next
+    to it — the exact "10.0 / 10 • Level: LOW" seen in the Prompt Opinion
+    artifact. The Vercel UI escaped the bug only because it re-derives the
+    label from the numeric score via ``severity.ts`` instead of reading the
+    agent's ``severity_label`` text.
+
+    Coercing to a dict here closes the gap for every result shape (dict,
+    Pydantic v2 ``model_dump``, Pydantic v1 ``dict``, or a plain object with
+    ``__dict__``). Returns ``None`` only when the value cannot be coerced,
+    so the caller can drop it cleanly rather than carry a broken result
+    downstream.
+    """
+    if obj is None:
+        return None
+    if isinstance(obj, dict):
+        return obj
+    # Pydantic v2
+    model_dump = getattr(obj, "model_dump", None)
+    if callable(model_dump):
+        try:
+            return model_dump()
+        except Exception:  # pragma: no cover - defensive
+            pass
+    # Pydantic v1
+    dict_method = getattr(obj, "dict", None)
+    if callable(dict_method):
+        try:
+            return dict_method()
+        except Exception:  # pragma: no cover - defensive
+            pass
+    # dataclass / generic object with attributes
+    if hasattr(obj, "__dict__"):
+        try:
+            return dict(vars(obj))
+        except Exception:  # pragma: no cover - defensive
+            pass
+    logger.warning("Could not coerce risk score result of type %s to dict", type(obj).__name__)
+    return None
+
+
+def _normalize_severity(risk_score: Any) -> dict | None:
     """Ensure every risk score has a deterministic severity_label and a
-    clamped 0–10 numeric value."""
-    if not isinstance(risk_score, dict):
-        return risk_score
+    clamped 0–10 numeric value.
+
+    Accepts a dict OR a Pydantic model / object (coerced via ``_as_dict``).
+    Returns a normalised dict, or ``None`` if the input cannot be coerced.
+    """
+    risk_score = _as_dict(risk_score)
+    if risk_score is None:
+        return None
 
     raw_adjusted = risk_score.get("adjusted_score", risk_score.get("base_score", 5.0))
     raw_base = risk_score.get("base_score", raw_adjusted)
@@ -114,6 +176,9 @@ async def phenotype_score(state: dict[str, Any]) -> dict[str, Any]:
     async def score_one(interaction: dict) -> dict | None:
         try:
             result = await mcp.score_risk(interaction, phenotype)
+            # `_normalize_severity` now coerces the MCP result (dict OR
+            # Pydantic model) into a normalised dict, so every element of
+            # `risk_scores` is guaranteed to be a dict from here on.
             return _normalize_severity(result) if result is not None else None
         except Exception as e:
             logger.error("score_risk failed for %s: %s", interaction.get("id"), e)
@@ -132,10 +197,11 @@ async def phenotype_score(state: dict[str, Any]) -> dict[str, Any]:
     # (Vercel report, Prompt Opinion artifact, PDF export) never disagree
     # with the numeric score again.
     #
-    # `adjusted_score` is already clamped to [0, 10] by `_normalize_severity`,
-    # so `max(...)` is guaranteed to also be in range. We never want to emit
-    # a "15.3 / 10" anywhere — that bug was produced by a downstream
-    # consumer reading an un-clamped raw field.
+    # Every `rs` is a normalised dict (see `_normalize_severity` / `_as_dict`),
+    # and `adjusted_score` is already clamped to [0, 10], so `max(...)` is
+    # guaranteed to be in range and never silently drops a model instance.
+    # That dropped-model path is what previously collapsed overall risk to
+    # 0.0 / "LOW" beside a per-interaction 10.0.
     overall_risk = None
     if risk_scores:
         max_score = _clamp_score(
