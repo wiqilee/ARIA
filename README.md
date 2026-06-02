@@ -618,9 +618,9 @@ ARIA's `0–10` risk score is mapped to a categorical label using a deterministi
 
 The same mapping is implemented in three places and kept in lockstep:
 
-1. `mcp-server/src/agent_tools/score_risk.rs` &mdash; `severity_label_for_score()` is the authoritative implementation. It runs on the Rust backend after every `score_risk` call and the resulting label is serialized into the `RiskScore.severity_label` field.
-2. `agent/src/steps/phenotype_scorer.py` &mdash; `_severity_label_for_score()` is a backstop. It re-applies the mapping to every risk score returned by the MCP server, overrides any conflicting label (logging a warning), and computes the overall risk severity used by the report layer.
-3. `frontend/lib/severity.ts` &mdash; `getSeverityLabel()` and `getSeverityColor()` are imported by `SeverityMeter.tsx` and the report components so the numeric score, the meter color, and the label text can never disagree.
+1. `mcp-server/src/tools/score_risk.rs` &mdash; `severity_label_for_score()` is the authoritative implementation. It runs on the Rust backend after every `score_risk` call and the resulting label is serialized into the `RiskScore.severity_label` field.
+2. `agent/src/pipeline/phenotype_scorer.py` &mdash; `_severity_label_for_score()` is a backstop. It re-applies the mapping to every risk score returned by the MCP server, overrides any conflicting label (logging a warning), and computes the overall risk severity used by the report layer.
+3. `frontend/src/lib/severity.ts` &mdash; `getSeverityLabel()` and `getSeverityColor()` are imported by `SeverityMeter.tsx` and the report components so the numeric score, the meter color, and the label text can never disagree.
 
 The LLM is never asked to produce the severity label directly. If it volunteers one in its JSON response, the Rust layer logs the value for prompt auditing but discards it. This eliminates the class of bug where a score of `9.4` or `10.0` could be rendered as `MODERATE` due to a hallucinated label.
 
