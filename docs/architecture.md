@@ -53,7 +53,7 @@ ARIA could have been a single monolithic Python service. Splitting it into three
 
 ## MCP Server (Rust)
 
-The MCP Server is the data and reasoning backbone. It exposes ten tools over the Model Context Protocol (MCP) via HTTP transport. The full input and output schema for each tool lives in [`docs/api-reference.md`](api-reference.md).
+The MCP Server is the data and reasoning backbone. It exposes twelve tools over the Model Context Protocol (MCP) via HTTP transport. The full input and output schema for each tool lives in [`docs/api-reference.md`](api-reference.md).
 
 **Responsibilities:**
 
@@ -81,8 +81,12 @@ The Agent orchestrates the full clinical reasoning pipeline. It receives a medic
 4. **Phenotype Score.** Apply patient-specific risk multipliers.
 5. **Temporal Model.** Project risk cascade timelines.
 6. **Evidence Grade.** Attach PubMed citations and confidence scores.
-7. **Deprescribing Plan.** Generate prioritized action plan.
-8. **Report.** Assemble the final structured clinical output.
+7. **Renal Dosing.** Flag CKD/eGFR-aware dose adjustments (deterministic, rule-based).
+8. **Appropriateness.** Screen for Beers/STOPP PIMs and START omissions in older adults (deterministic, rule-based).
+9. **Deprescribing Plan.** Generate prioritized action plan.
+10. **Report.** Assemble the final structured clinical output.
+
+Stages 4 through 8 (phenotype scoring, temporal modeling, evidence grading, renal dosing, and appropriateness screening) run concurrently in a parallel fan-out, since each consumes the same upstream inputs and none depends on another's output.
 
 **Key design decisions:**
 

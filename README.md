@@ -1184,15 +1184,15 @@ In production, the FHIR endpoint is replaced with the partner EHR's FHIR server,
 
 ## Post-Hackathon Feature Increments
 
-Three clinical-depth increments were added after the hackathon, each following the same architectural pattern and the project's anti-alert-fatigue thesis: patient-specific, actionable output rather than more undifferentiated warnings. The execution order was deliberate — **A** protects trust, **B** and **C** add clinical depth.
+Three clinical-depth increments were added after the hackathon, each following the same architectural pattern and the project's anti-alert-fatigue thesis: patient-specific, actionable output rather than more undifferentiated warnings. The execution order was deliberate. **A** protects trust, then **B** and **C** add clinical depth.
 
-### A — Score/Label Consistency Guardrail
+### A. Score and Label Consistency Guardrail
 A final pipeline node (`agent/src/pipeline/consistency_check.py`) asserts that every rendered severity **Level** is derived from the same numeric score via `severity_label_for_score()`, on every surface (Vercel, A2A/Prompt Opinion, PDF). A CI unit test fails the build if a randomly-scored case ever renders a label that disagrees with the canonical mapping. This closes the score↔label bug class at the source. The deterministic mapping itself is mirrored across the Rust server, the Python agent, and the frontend `severity.ts`.
 
-### B — CKD/eGFR-Aware Renal Dosing
+### B. CKD and eGFR-Aware Renal Dosing
 The `assess_renal_dosing` MCP tool (`mcp-server/src/tools/renal_dosing.rs`, data in `mcp-server/src/data/renal_dosing.json`) flags each renally-handled drug with a concrete action (`reduce` / `avoid` / `monitor` / `adjust` / `no_change`) against an eGFR band estimated from CKD stage. It is **deterministic and rule-based** (16-drug reference set, `include_str!`-embedded, no Gemini call) so dose guidance carries no model variance. The agent step is `renal_adjuster.py`; the UI renders as a Renal Dosing section inside `RiskReport.tsx`.
 
-### C — Geriatric Appropriateness (Beers + STOPP/START)
+### C. Geriatric Appropriateness (Beers plus STOPP and START)
 The `screen_appropriateness` MCP tool (`mcp-server/src/tools/appropriateness.rs`, data in `mcp-server/src/data/beers_stopp.json`) screens patients aged 65+ for **potentially inappropriate medications** (AGS Beers + STOPP) and **prescribing omissions** (START), each tied to its named criterion. Also **deterministic and rule-based**, with the same below-age clean exit. The agent step is `appropriateness_screener.py`; the UI renders as an Appropriateness section inside `RiskReport.tsx`.
 
 Both B and C run inside the existing parallel fan-out (alongside phenotype scoring, temporal modelling, and evidence grading), attach their structured result onto the report in `report_builder.py`, surface in the Prompt Opinion A2A artifact via the renderer in `agent/src/main.py`, and are typed in `frontend/src/lib/types.ts`.

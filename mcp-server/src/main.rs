@@ -298,9 +298,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_list_tools_returns_nine_tools() {
+    fn test_list_tools_returns_eleven_tools() {
         let tools = list_tools();
-        assert_eq!(tools.len(), 9, "ARIA should expose exactly 9 MCP tools");
+        assert_eq!(tools.len(), 11, "ARIA should expose exactly 11 MCP tools");
     }
 
     #[test]
@@ -316,6 +316,8 @@ mod tests {
         assert!(names.contains(&"model_temporal_cascade"));
         assert!(names.contains(&"generate_deprescribing_plan"));
         assert!(names.contains(&"generate_report"));
+        assert!(names.contains(&"assess_renal_dosing"));
+        assert!(names.contains(&"screen_appropriateness"));
     }
 
     #[test]

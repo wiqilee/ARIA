@@ -16,6 +16,8 @@ All tools are exposed via the Model Context Protocol (MCP) over HTTP transport. 
   - [generate_deprescribing_plan](#generate_deprescribing_plan)
   - [generate_report](#generate_report)
   - [fhir_patient_medications](#fhir_patient_medications)
+  - [assess_renal_dosing](#assess_renal_dosing)
+  - [screen_appropriateness](#screen_appropriateness)
 - [Health Check](#health-check)
 - [Errors](#errors)
 
@@ -253,6 +255,100 @@ All three fields are optional at the tool layer. The agent layer populates them 
 ```
 
 See [`docs/sharp-integration.md`](sharp-integration.md) for the full FHIR context propagation rules, fallback ladders, and security invariants.
+
+### `assess_renal_dosing`
+
+Flag medications that need a renal dose adjustment, avoidance, or monitoring for the patient's kidney function. This tool is deterministic and rule-based: it does not call Gemini. Dose decisions are a clinical-safety surface where a fixed, auditable ruleset is safer than generative output, so the same patient and medication list always produce the same flags.
+
+**Input:**
+
+```json
+{
+  "drugs": [
+    { "name": "digoxin" },
+    { "name": "furosemide" },
+    { "name": "metformin" }
+  ],
+  "patient_context": {
+    "age": 72,
+    "ckd_stage": 3
+  }
+}
+```
+
+**Output:** `RenalAssessment` with the CKD stage, the eGFR band estimated from that stage, and a per-drug list of flags. Each flagged drug carries an action (`reduce`, `avoid`, `monitor`, `adjust`, or `no_change`), the renal handling note, and a recommendation. Drugs with no renal concern are listed separately. Every result ships with a disclaimer that the eGFR is estimated from CKD stage, not measured, and that recommendations must be verified against a current renal-dosing reference.
+
+```json
+{
+  "ckd_stage": 3,
+  "estimated_egfr_range": "30-59",
+  "flagged": [
+    {
+      "drug": "digoxin",
+      "action": "reduce",
+      "renal_handling": "Primarily renally eliminated, narrow therapeutic index",
+      "recommendation": "Reduce dose and monitor serum digoxin level",
+      "egfr_threshold": 50
+    }
+  ],
+  "ok": ["metformin"],
+  "summary": "1 of 3 medications flagged for renal dose adjustment at CKD stage 3.",
+  "disclaimer": "Decision support only..."
+}
+```
+
+The reference set covers 16 commonly renally-handled drugs and is compiled into the binary with `include_str!` from `mcp-server/src/data/renal_dosing.json`, so there is no runtime file dependency. See [`docs/architecture.md`](architecture.md) for where this runs in the pipeline.
+
+### `screen_appropriateness`
+
+Screen the medication list for potentially inappropriate medications (PIMs) and prescribing omissions in older adults, using the AGS Beers Criteria, STOPP, and START. Each finding cites the specific named criterion a clinician already recognizes. Like renal dosing, this tool is deterministic and rule-based, not LLM-generated. Screening applies at or above the framework age (65 by default); below that age the tool returns cleanly unscreened with no flags.
+
+**Input:**
+
+```json
+{
+  "drugs": [
+    { "name": "diazepam" },
+    { "name": "amitriptyline" },
+    { "name": "aspirin" }
+  ],
+  "patient_context": {
+    "age": 72,
+    "comorbidities": ["coronary artery disease", "osteoporosis"]
+  }
+}
+```
+
+**Output:** `AppropriatenessAssessment` with the patient age, a `screened` flag, a list of PIM flags (Beers and STOPP), and a list of prescribing omissions (START). Each PIM flag carries the drug, the framework, the criterion, the rationale, and a recommendation. Each omission carries the suggested drug or class, the triggering comorbidity, the criterion, and a recommendation.
+
+```json
+{
+  "age": 72,
+  "screened": true,
+  "pim_flags": [
+    {
+      "drug": "diazepam",
+      "framework": "beers",
+      "criterion": "Beers 2023: long-acting benzodiazepine",
+      "rationale": "Increased sensitivity, risk of falls, delirium, fractures",
+      "recommendation": "Avoid; taper rather than stop abruptly"
+    }
+  ],
+  "omissions": [
+    {
+      "omission": "statin",
+      "criterion": "START v3: statin with documented ASCVD",
+      "triggered_by": "coronary artery disease",
+      "rationale": "Statins reduce cardiovascular events in established ASCVD",
+      "recommendation": "Consider starting a statin absent contraindication"
+    }
+  ],
+  "summary": "Geriatric screen (age 72): 1 PIM, 1 omission.",
+  "disclaimer": "Decision support only..."
+}
+```
+
+The criteria set is compiled into the binary with `include_str!` from `mcp-server/src/data/beers_stopp.json`. Criterion text is paraphrased from the AGS Beers Criteria (2023) and STOPP/START v3 (2023), not reproduced verbatim, and should be verified against the current published editions before clinical use.
 
 ## Health Check
 
