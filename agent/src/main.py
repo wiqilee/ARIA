@@ -1102,9 +1102,29 @@ async def _run_pipeline_and_store(
 
 @app.get("/health")
 async def health():
-    mcp_healthy = await mcp_client.health_check()
+    # Liveness probe. This MUST return 200 quickly and MUST NOT depend on a
+    # network round-trip to the MCP server. Cloud Run (and the deploy
+    # workflow) call this to decide whether the revision is healthy; if it
+    # blocked on a cold-starting or briefly-unreachable MCP server it could
+    # hang or fail and sink an otherwise-good deployment. MCP reachability is
+    # probed in the background at startup and retried on every real request,
+    # so the agent does not need MCP to be up just to report that it is alive.
     return {
         "status": "healthy",
+        "service": "aria-agent",
+        "mcp_url": MCP_SERVER_URL,
+    }
+
+
+@app.get("/health/mcp")
+async def health_mcp():
+    # Optional deeper check: actually probe the MCP server. Kept separate so
+    # it never gates liveness. Always returns 200; the body carries status.
+    try:
+        mcp_healthy = await mcp_client.health_check()
+    except Exception:
+        mcp_healthy = False
+    return {
         "service": "aria-agent",
         "mcp_server": "connected" if mcp_healthy else "disconnected",
         "mcp_url": MCP_SERVER_URL,
