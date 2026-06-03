@@ -1,11 +1,13 @@
 #![allow(dead_code)]
 
+pub mod appropriateness;
 pub mod burden_scores;
 pub mod check_interactions;
 pub mod deprescribing_plan;
 pub mod explain_mechanism;
 pub mod generate_report;
 pub mod interaction_graph;
+pub mod renal_dosing;
 pub mod score_risk;
 pub mod suggest_alternatives;
 pub mod temporal_cascade;
@@ -16,6 +18,8 @@ use serde_json::Value;
 
 use crate::api::{DrugBankClient, GeminiClient, OpenFdaClient, PubMedClient, RxNormClient};
 use crate::models::{Drug, FullAnalysis, PatientContext};
+// AppropriatenessAssessment is returned by the appropriateness tool; the
+// concrete type is constructed inside tools/appropriateness.rs.
 
 /// MCP tool call request.
 #[derive(Debug, Deserialize)]
@@ -195,6 +199,56 @@ pub fn list_tools() -> Vec<ToolDefinition> {
                 "required": ["analysis"]
             }),
         },
+        ToolDefinition {
+            name: "assess_renal_dosing".to_string(),
+            description: "Flag medications that require renal dose adjustment, avoidance, or monitoring for the patient's CKD stage (deterministic, rule-based).".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "drugs": {
+                        "type": "array",
+                        "items": {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}
+                    },
+                    "patient_context": {
+                        "type": "object",
+                        "properties": {
+                            "age": {"type": "integer"},
+                            "sex": {"type": "string"},
+                            "weight_kg": {"type": "number"},
+                            "ckd_stage": {"type": "integer"},
+                            "hepatic_impairment": {"type": "boolean"},
+                            "smoking": {"type": "boolean"}
+                        }
+                    }
+                },
+                "required": ["drugs"]
+            }),
+        },
+        ToolDefinition {
+            name: "screen_appropriateness".to_string(),
+            description: "Screen the medication list for potentially inappropriate medications (AGS Beers + STOPP) and prescribing omissions (START) for older adults, citing the specific criterion (deterministic, rule-based).".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "drugs": {
+                        "type": "array",
+                        "items": {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}
+                    },
+                    "patient_context": {
+                        "type": "object",
+                        "properties": {
+                            "age": {"type": "integer"},
+                            "sex": {"type": "string"},
+                            "ckd_stage": {"type": "integer"},
+                            "hepatic_impairment": {"type": "boolean"},
+                            "smoking": {"type": "boolean"},
+                            "comorbidities": {"type": "array", "items": {"type": "string"}}
+                        }
+                    }
+                },
+                "required": ["drugs"]
+            }),
+        },
     ]
 }
 
@@ -364,6 +418,58 @@ pub async fn dispatch_tool(
             )?;
 
             let result = generate_report::generate_report(&analysis, gemini).await?;
+
+            Ok(serde_json::to_value(result)?)
+        }
+
+        "assess_renal_dosing" => {
+            let drugs: Vec<Drug> = serde_json::from_value(
+                params.get("drugs").cloned().unwrap_or(Value::Array(vec![])),
+            )?;
+            let patient_context: PatientContext = params
+                .get("patient_context")
+                .and_then(|p| serde_json::from_value(p.clone()).ok())
+                .unwrap_or_else(|| PatientContext {
+                    age: 50,
+                    sex: "unknown".to_string(),
+                    weight_kg: None,
+                    height_cm: None,
+                    ckd_stage: 0,
+                    hepatic_impairment: false,
+                    smoking: false,
+                    alcohol_use: "none".to_string(),
+                    comorbidities: vec![],
+                    allergies: vec![],
+                });
+
+            let result =
+                renal_dosing::assess_renal_dosing(&drugs, &patient_context, gemini).await?;
+
+            Ok(serde_json::to_value(result)?)
+        }
+
+        "screen_appropriateness" => {
+            let drugs: Vec<Drug> = serde_json::from_value(
+                params.get("drugs").cloned().unwrap_or(Value::Array(vec![])),
+            )?;
+            let patient_context: PatientContext = params
+                .get("patient_context")
+                .and_then(|p| serde_json::from_value(p.clone()).ok())
+                .unwrap_or_else(|| PatientContext {
+                    age: 50,
+                    sex: "unknown".to_string(),
+                    weight_kg: None,
+                    height_cm: None,
+                    ckd_stage: 0,
+                    hepatic_impairment: false,
+                    smoking: false,
+                    alcohol_use: "none".to_string(),
+                    comorbidities: vec![],
+                    allergies: vec![],
+                });
+
+            let result =
+                appropriateness::screen_appropriateness(&drugs, &patient_context, gemini).await?;
 
             Ok(serde_json::to_value(result)?)
         }

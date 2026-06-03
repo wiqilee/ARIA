@@ -175,6 +175,37 @@ class MCPClient:
             args["fhir_server_url"] = server_url
         return await self.call_tool("fhir_patient_medications", args)
 
+    async def assess_renal_dosing(
+        self,
+        drugs: list[dict],
+        patient_context: dict,
+    ) -> dict:
+        """Deterministic CKD/eGFR-aware renal dose-adjustment flags.
+
+        Calls the rule-based `assess_renal_dosing` MCP tool. `patient_context`
+        must carry `ckd_stage`; the tool estimates eGFR from it.
+        """
+        return await self.call_tool("assess_renal_dosing", {
+            "drugs": drugs,
+            "patient_context": patient_context,
+        })
+
+    async def screen_appropriateness(
+        self,
+        drugs: list[dict],
+        patient_context: dict,
+    ) -> dict:
+        """Deterministic geriatric prescribing-appropriateness screen.
+
+        Calls the rule-based `screen_appropriateness` MCP tool (AGS Beers +
+        STOPP/START). `patient_context` should carry `age` and
+        `comorbidities`; screening applies at/above the framework age.
+        """
+        return await self.call_tool("screen_appropriateness", {
+            "drugs": drugs,
+            "patient_context": patient_context,
+        })
+
 
 class MCPError(Exception):
     """Error from the MCP server."""

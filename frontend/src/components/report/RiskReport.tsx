@@ -45,6 +45,8 @@ const SECTION_ACCENT = {
   critical: "#ef4444",
   summary: "#06b6d4",
   burden: "#8b5cf6",
+  renal: "#14b8a6",
+  appropriateness: "#e879a6",
   interactions: "#f59e0b",
   deprescribing: "#10b981",
   citations: "#06b6d4",
@@ -176,6 +178,23 @@ export function RiskReport({ data }: RiskReportProps) {
     ? report.evidence_citations
     : [];
 
+  // Slice B / C clinical-depth assessments. Both are optional and render
+  // nothing when absent; appropriateness additionally self-hides when the
+  // patient was below the screening age (screened === false).
+  const renalAssessment = report.renal_assessment || null;
+  const renalFlagged = Array.isArray(renalAssessment?.flagged)
+    ? renalAssessment!.flagged
+    : [];
+  const renalOk = Array.isArray(renalAssessment?.ok) ? renalAssessment!.ok : [];
+
+  const appropriateness = report.appropriateness || null;
+  const pimFlags = Array.isArray(appropriateness?.pim_flags)
+    ? appropriateness!.pim_flags
+    : [];
+  const omissions = Array.isArray(appropriateness?.omissions)
+    ? appropriateness!.omissions
+    : [];
+
   // Resolve the interaction summary: use the agent's own text when it's
   // meaningful, otherwise synthesise one from the structured findings.
   const rawSummary = (report.interaction_summary || "").trim();
@@ -299,6 +318,290 @@ export function RiskReport({ data }: RiskReportProps) {
         </SectionCard>
         );
       })()}
+
+      {/* Renal Dosing (Slice B) — CKD/eGFR-aware dose flags. Rendered in the
+          RiskReport visual language (SectionCard + inline styles + CSS vars)
+          rather than the standalone RenalDosing.tsx card, so it matches the
+          rest of the column. */}
+      {renalAssessment && (renalFlagged.length > 0 || renalAssessment.summary) && (
+        <SectionCard accentColor={SECTION_ACCENT.renal} delay={0.22}>
+          <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+            <h3
+              className="font-display font-semibold text-xs uppercase tracking-wider"
+              style={{ color: SECTION_ACCENT.renal }}
+            >
+              🫘 Renal Dosing
+            </h3>
+            <div className="flex items-center gap-2">
+              <span
+                className="text-[10px] px-2 py-0.5 rounded font-mono"
+                style={{
+                  color: SECTION_ACCENT.renal,
+                  background: `${SECTION_ACCENT.renal}1a`,
+                  border: `1px solid ${SECTION_ACCENT.renal}33`,
+                }}
+              >
+                CKD stage {renalAssessment.ckd_stage}
+              </span>
+              {renalAssessment.estimated_egfr_range && (
+                <span className="text-[10px]" style={{ color: "#7a8ba8" }}>
+                  est. eGFR {renalAssessment.estimated_egfr_range} mL/min/1.73m²
+                </span>
+              )}
+            </div>
+          </div>
+
+          {renalFlagged.length > 0 ? (
+            <div className="space-y-2">
+              {renalFlagged.map((d: any, i: number) => {
+                const action = (d?.action || "").toLowerCase();
+                const aColor =
+                  action === "avoid"
+                    ? "var(--danger)"
+                    : action === "reduce" || action === "adjust"
+                      ? "var(--warning)"
+                      : action === "no_change"
+                        ? "var(--success)"
+                        : SECTION_ACCENT.renal;
+                return (
+                  <div
+                    key={`${d?.drug ?? i}-${i}`}
+                    className="p-3 rounded-lg"
+                    style={{
+                      background: "rgba(3, 11, 26, 0.5)",
+                      border: `1px solid ${aColor}26`,
+                    }}
+                  >
+                    <div className="flex items-center justify-between mb-1 gap-2">
+                      <span className="text-sm font-mono" style={{ color: "#d0daea" }}>
+                        {d?.drug ?? "—"}
+                      </span>
+                      <span
+                        className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded"
+                        style={{
+                          color: aColor,
+                          background: `${aColor}14`,
+                          border: `1px solid ${aColor}26`,
+                          letterSpacing: "0.12em",
+                        }}
+                      >
+                        {action || "review"}
+                      </span>
+                    </div>
+                    {d?.renal_handling && (
+                      <p className="text-[10px] mb-1" style={{ color: "#7a8ba8" }}>
+                        {d.renal_handling}
+                      </p>
+                    )}
+                    {d?.recommendation && (
+                      <p className="text-xs leading-relaxed" style={{ color: "#94a8c8" }}>
+                        {d.recommendation}
+                      </p>
+                    )}
+                    {typeof d?.egfr_threshold === "number" && (
+                      <p className="text-[10px] mt-1" style={{ color: "#6b7f9e" }}>
+                        Applies below eGFR {d.egfr_threshold} mL/min/1.73m²
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <p
+              className="text-xs leading-relaxed p-3 rounded-lg"
+              style={{
+                color: "var(--success)",
+                background: "rgba(16, 185, 129, 0.06)",
+                border: "1px solid rgba(16, 185, 129, 0.18)",
+              }}
+            >
+              No medications in the reference set require renal dose adjustment at this eGFR.
+            </p>
+          )}
+
+          {renalOk.length > 0 && (
+            <p className="text-[11px] mt-3" style={{ color: "#7a8ba8" }}>
+              No renal concern: {renalOk.join(", ")}.
+            </p>
+          )}
+          {renalAssessment.summary && (
+            <p className="text-xs mt-3 leading-relaxed" style={{ color: "#c7d2e0" }}>
+              {renalAssessment.summary}
+            </p>
+          )}
+          {renalAssessment.disclaimer && (
+            <p
+              className="text-[10px] mt-3 leading-relaxed pl-3 italic"
+              style={{ color: "#6b7f9e", borderLeft: "2px solid rgba(100, 116, 139, 0.4)" }}
+            >
+              {renalAssessment.disclaimer}
+            </p>
+          )}
+        </SectionCard>
+      )}
+
+      {/* Appropriateness (Slice C) — Beers/STOPP PIMs + START omissions.
+          Self-hides when the patient was not screened (under the framework
+          age). Same RiskReport visual language as the other sections. */}
+      {appropriateness &&
+        appropriateness.screened &&
+        (pimFlags.length > 0 || omissions.length > 0 || appropriateness.summary) && (
+          <SectionCard accentColor={SECTION_ACCENT.appropriateness} delay={0.24}>
+            <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+              <h3
+                className="font-display font-semibold text-xs uppercase tracking-wider"
+                style={{ color: SECTION_ACCENT.appropriateness }}
+              >
+                🩺 Appropriateness
+              </h3>
+              <div className="flex items-center gap-2">
+                <span
+                  className="text-[10px] px-2 py-0.5 rounded font-mono"
+                  style={{
+                    color: SECTION_ACCENT.appropriateness,
+                    background: `${SECTION_ACCENT.appropriateness}1a`,
+                    border: `1px solid ${SECTION_ACCENT.appropriateness}33`,
+                  }}
+                >
+                  Beers / STOPP-START
+                </span>
+                <span className="text-[10px]" style={{ color: "#7a8ba8" }}>
+                  age {appropriateness.age}
+                </span>
+              </div>
+            </div>
+
+            {pimFlags.length > 0 && (
+              <>
+                <h4
+                  className="font-display font-semibold text-[10px] uppercase tracking-widest mb-2"
+                  style={{ color: "#a3b8d0", letterSpacing: "0.16em" }}
+                >
+                  Potentially Inappropriate Medications ({pimFlags.length})
+                </h4>
+                <div className="space-y-2 mb-3">
+                  {pimFlags.map((f: any, i: number) => {
+                    const fw = (f?.framework || "").toLowerCase();
+                    const fColor = fw === "stopp" ? "var(--danger)" : "var(--warning)";
+                    return (
+                      <div
+                        key={`${f?.drug ?? i}-${i}`}
+                        className="p-3 rounded-lg"
+                        style={{
+                          background: "rgba(3, 11, 26, 0.5)",
+                          border: `1px solid ${fColor}26`,
+                        }}
+                      >
+                        <div className="flex items-center justify-between mb-1 gap-2">
+                          <span className="text-sm font-mono" style={{ color: "#d0daea" }}>
+                            {f?.drug ?? "—"}
+                          </span>
+                          <span
+                            className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded"
+                            style={{
+                              color: fColor,
+                              background: `${fColor}14`,
+                              border: `1px solid ${fColor}26`,
+                              letterSpacing: "0.12em",
+                            }}
+                          >
+                            {fw || "beers"}
+                          </span>
+                        </div>
+                        {f?.criterion && (
+                          <p className="text-[10px] mb-1" style={{ color: "#7a8ba8" }}>
+                            {f.criterion}
+                          </p>
+                        )}
+                        {f?.rationale && (
+                          <p className="text-xs leading-relaxed" style={{ color: "#94a8c8" }}>
+                            {f.rationale}
+                          </p>
+                        )}
+                        {f?.recommendation && (
+                          <p
+                            className="text-xs mt-1 leading-relaxed"
+                            style={{ color: "#c4d0e4" }}
+                          >
+                            <span style={{ color: SECTION_ACCENT.appropriateness }}>
+                              Action:{" "}
+                            </span>
+                            {f.recommendation}
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+
+            {omissions.length > 0 && (
+              <>
+                <h4
+                  className="font-display font-semibold text-[10px] uppercase tracking-widest mb-2"
+                  style={{ color: "#a3b8d0", letterSpacing: "0.16em" }}
+                >
+                  Potential Prescribing Omissions ({omissions.length})
+                </h4>
+                <div className="space-y-2">
+                  {omissions.map((o: any, i: number) => (
+                    <div
+                      key={`${o?.omission ?? i}-${i}`}
+                      className="p-3 rounded-lg"
+                      style={{
+                        background: "rgba(16, 185, 129, 0.05)",
+                        border: "1px solid rgba(16, 185, 129, 0.18)",
+                      }}
+                    >
+                      <div className="flex items-center justify-between mb-1 gap-2">
+                        <span className="text-sm font-mono" style={{ color: "#d0daea" }}>
+                          {o?.omission ?? "—"}
+                        </span>
+                        <span
+                          className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded"
+                          style={{
+                            color: "var(--success)",
+                            background: "rgba(16, 185, 129, 0.1)",
+                            border: "1px solid rgba(16, 185, 129, 0.22)",
+                            letterSpacing: "0.12em",
+                          }}
+                        >
+                          start
+                        </span>
+                      </div>
+                      {o?.triggered_by && (
+                        <p className="text-[10px] mb-1" style={{ color: "#7a8ba8" }}>
+                          Triggered by: {o.triggered_by}
+                        </p>
+                      )}
+                      {o?.recommendation && (
+                        <p className="text-xs leading-relaxed" style={{ color: "#94a8c8" }}>
+                          {o.recommendation}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+
+            {appropriateness.summary && (
+              <p className="text-xs mt-3 leading-relaxed" style={{ color: "#c7d2e0" }}>
+                {appropriateness.summary}
+              </p>
+            )}
+            {appropriateness.disclaimer && (
+              <p
+                className="text-[10px] mt-3 leading-relaxed pl-3 italic"
+                style={{ color: "#6b7f9e", borderLeft: "2px solid rgba(100, 116, 139, 0.4)" }}
+              >
+                {appropriateness.disclaimer}
+              </p>
+            )}
+          </SectionCard>
+        )}
 
       {/* Detected Interactions */}
       {interactions.length > 0 && (

@@ -736,6 +736,95 @@ def _format_pipeline_result_markdown(
             lines.append(f"_...and {len(interactions) - 10} additional interaction(s)._")
         lines.append("")
 
+    renal = report.get("renal_assessment") or {}
+    renal_flagged = renal.get("flagged") or []
+    if renal_flagged or renal.get("summary"):
+        lines.append("## 🫘 Renal Dosing")
+        lines.append("")
+        stage = renal.get("ckd_stage")
+        egfr = renal.get("estimated_egfr_range")
+        if stage is not None:
+            hdr = f"**CKD stage {stage}**"
+            if egfr:
+                hdr += f"  •  est. eGFR {egfr} mL/min/1.73m²"
+            lines.append(hdr)
+            lines.append("")
+        if renal_flagged:
+            lines.append("| Drug | Action | Recommendation |")
+            lines.append("|------|--------|----------------|")
+            for d in renal_flagged[:12]:
+                if not isinstance(d, dict):
+                    continue
+                drug = d.get("drug", "?")
+                action = str(d.get("action", "")).upper()
+                rec = str(d.get("recommendation", "")).replace("\n", " ").replace("|", "/").strip()
+                if len(rec) > 160:
+                    rec = rec[:157] + "..."
+                lines.append(f"| {drug} | {action} | {rec} |")
+            lines.append("")
+        renal_ok = renal.get("ok") or []
+        if renal_ok:
+            lines.append(
+                f"_No renal dose concern in the reference set: {', '.join(str(x) for x in renal_ok)}._"
+            )
+            lines.append("")
+        if renal.get("summary"):
+            lines.append(f"_{renal.get('summary')}_")
+            lines.append("")
+        if renal.get("disclaimer"):
+            lines.append(f"> {renal.get('disclaimer')}")
+            lines.append("")
+
+    appropriateness = report.get("appropriateness") or {}
+    pim_flags = appropriateness.get("pim_flags") or []
+    omissions = appropriateness.get("omissions") or []
+    if appropriateness.get("screened") and (pim_flags or omissions or appropriateness.get("summary")):
+        lines.append("## 🩺 Appropriateness (Beers / STOPP-START)")
+        lines.append("")
+        age = appropriateness.get("age")
+        if age is not None:
+            lines.append(f"**Geriatric screen — age {age}**")
+            lines.append("")
+        if pim_flags:
+            lines.append("**Potentially inappropriate medications**")
+            lines.append("")
+            lines.append("| Drug | Framework | Criterion | Recommendation |")
+            lines.append("|------|-----------|-----------|----------------|")
+            for f in pim_flags[:12]:
+                if not isinstance(f, dict):
+                    continue
+                drug = f.get("drug", "?")
+                fw = str(f.get("framework", "")).upper()
+                crit = str(f.get("criterion", "")).replace("\n", " ").replace("|", "/").strip()
+                if len(crit) > 80:
+                    crit = crit[:77] + "..."
+                rec = str(f.get("recommendation", "")).replace("\n", " ").replace("|", "/").strip()
+                if len(rec) > 120:
+                    rec = rec[:117] + "..."
+                lines.append(f"| {drug} | {fw} | {crit} | {rec} |")
+            lines.append("")
+        if omissions:
+            lines.append("**Potential prescribing omissions (START)**")
+            lines.append("")
+            lines.append("| Suggested | Triggered by | Recommendation |")
+            lines.append("|-----------|--------------|----------------|")
+            for o in omissions[:12]:
+                if not isinstance(o, dict):
+                    continue
+                omit = o.get("omission", "?")
+                trig = str(o.get("triggered_by", "")).replace("\n", " ").replace("|", "/").strip()
+                rec = str(o.get("recommendation", "")).replace("\n", " ").replace("|", "/").strip()
+                if len(rec) > 120:
+                    rec = rec[:117] + "..."
+                lines.append(f"| {omit} | {trig} | {rec} |")
+            lines.append("")
+        if appropriateness.get("summary"):
+            lines.append(f"_{appropriateness.get('summary')}_")
+            lines.append("")
+        if appropriateness.get("disclaimer"):
+            lines.append(f"> {appropriateness.get('disclaimer')}")
+            lines.append("")
+
     daily_risk = temporal.get("daily_risk") or []
     windows = temporal.get("intervention_windows") or []
     peak_day = temporal.get("peak_risk_day")

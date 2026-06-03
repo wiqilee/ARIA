@@ -8,7 +8,7 @@ pub struct RiskScore {
     pub base_score: f64,
     pub adjusted_score: f64,
     /// Deterministic severity label derived from `adjusted_score` by
-    /// `severity_label_for_score()` in `agent_tools/score_risk.rs`.
+    /// `severity_label_for_score()` in `tools/score_risk.rs`.
     /// One of: "LOW", "MODERATE", "HIGH", "CRITICAL".
     /// `#[serde(default)]` keeps older payloads (without this field)
     /// deserializable as empty string — the agent layer backfills it.
@@ -112,6 +112,70 @@ pub struct ClinicalReport {
     pub evidence_citations: Vec<String>,
     pub overall_risk_level: String,
     pub report_text: String,
+}
+
+/// One drug flagged for renal dose review.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RenalDrugAdjustment {
+    pub drug: String,
+    pub renal_handling: String,
+    /// "reduce" | "avoid" | "monitor" | "adjust" | "no_change"
+    pub action: String,
+    pub recommendation: String,
+    /// eGFR (mL/min/1.73m²) below which this rule applies, if any.
+    pub egfr_threshold: Option<f64>,
+}
+
+/// Deterministic renal dosing assessment for the medication list.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RenalAssessment {
+    pub ckd_stage: u8,
+    /// Estimated eGFR band derived from CKD stage (not measured).
+    pub estimated_egfr_range: String,
+    pub flagged: Vec<RenalDrugAdjustment>,
+    /// Drugs with no renal concern in the reference set.
+    pub ok: Vec<String>,
+    pub summary: String,
+    pub disclaimer: String,
+}
+
+/// One potentially-inappropriate medication (PIM) flag from Beers / STOPP.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AppropriatenessFlag {
+    pub drug: String,
+    /// "beers" | "stopp"
+    pub framework: String,
+    /// Short criterion reference, e.g. "Beers 2023: first-generation antihistamine".
+    pub criterion: String,
+    pub rationale: String,
+    pub recommendation: String,
+}
+
+/// One prescribing omission (a drug that should arguably be present) from START.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PrescribingOmission {
+    /// Drug class or agent that may be missing, e.g. "statin".
+    pub omission: String,
+    pub criterion: String,
+    /// The comorbidity/indication that triggered the omission flag.
+    pub triggered_by: String,
+    pub rationale: String,
+    pub recommendation: String,
+}
+
+/// Deterministic geriatric prescribing-appropriateness screen
+/// (AGS Beers + STOPP/START), mirrors `RenalAssessment` in shape.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AppropriatenessAssessment {
+    pub age: u32,
+    /// True when the patient meets the screening age (default 65).
+    pub screened: bool,
+    /// Potentially inappropriate medications detected (Beers + STOPP).
+    pub pim_flags: Vec<AppropriatenessFlag>,
+    /// Potential prescribing omissions detected (START).
+    pub omissions: Vec<PrescribingOmission>,
+    pub summary: String,
+    pub disclaimer: String,
 }
 
 /// Combined analysis passed to report and deprescribing tools.

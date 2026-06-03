@@ -1,0 +1,143 @@
+{
+  "schema": "aria.renal_dosing/v1",
+  "source_note": "Conservative, qualitative renal-dosing decision support compiled from standard nephrology references. eGFR is ESTIMATED from CKD stage, not measured. Verify every recommendation against a current renal dosing reference (e.g. the Renal Drug Handbook or the product label) and a pharmacist before acting.",
+  "stage_egfr_estimate": {
+    "0": 95,
+    "1": 95,
+    "2": 75,
+    "3": 45,
+    "4": 22,
+    "5": 10
+  },
+  "drugs": [
+    {
+      "name": "digoxin",
+      "aliases": ["lanoxin"],
+      "renal_handling": "renally cleared (~70%), narrow therapeutic index",
+      "apply_at_egfr_below": 60,
+      "action": "reduce",
+      "recommendation": "Reduce maintenance dose and/or extend the dosing interval; monitor serum digoxin level and potassium. Accumulates as eGFR falls — toxicity risk rises in CKD."
+    },
+    {
+      "name": "furosemide",
+      "aliases": ["frusemide", "lasix"],
+      "renal_handling": "loop diuretic; not dose-reduced in CKD",
+      "apply_at_egfr_below": 90,
+      "action": "monitor",
+      "recommendation": "No routine dose reduction — loop diuretics often require HIGHER doses as eGFR falls. Monitor electrolytes and volume status; furosemide-induced hypokalaemia/hypomagnesaemia potentiates digoxin toxicity."
+    },
+    {
+      "name": "metformin",
+      "aliases": ["glucophage"],
+      "renal_handling": "renally cleared; lactic-acidosis risk in renal impairment",
+      "apply_at_egfr_below": 45,
+      "action": "reduce",
+      "recommendation": "Reassess dose at eGFR <45 and do not initiate; discontinue at eGFR <30 due to lactic-acidosis risk."
+    },
+    {
+      "name": "gabapentin",
+      "aliases": ["neurontin"],
+      "renal_handling": "renally cleared",
+      "apply_at_egfr_below": 60,
+      "action": "reduce",
+      "recommendation": "Dose-reduce in proportion to eGFR; accumulation causes sedation, ataxia and CNS toxicity in CKD."
+    },
+    {
+      "name": "pregabalin",
+      "aliases": ["lyrica"],
+      "renal_handling": "renally cleared",
+      "apply_at_egfr_below": 60,
+      "action": "reduce",
+      "recommendation": "Reduce dose per eGFR; risk of sedation/CNS depression with accumulation."
+    },
+    {
+      "name": "ibuprofen",
+      "aliases": ["nurofen", "advil", "nsaid"],
+      "renal_handling": "nephrotoxic (NSAID)",
+      "apply_at_egfr_below": 60,
+      "action": "avoid",
+      "recommendation": "Avoid NSAIDs in CKD: risk of acute kidney injury, hyperkalaemia, fluid retention and reduced diuretic efficacy. Prefer paracetamol."
+    },
+    {
+      "name": "naproxen",
+      "aliases": ["naprosyn"],
+      "renal_handling": "nephrotoxic (NSAID)",
+      "apply_at_egfr_below": 60,
+      "action": "avoid",
+      "recommendation": "Avoid NSAIDs in CKD: AKI, hyperkalaemia and reduced diuretic response. Prefer paracetamol."
+    },
+    {
+      "name": "diclofenac",
+      "aliases": ["voltaren", "voltarol"],
+      "renal_handling": "nephrotoxic (NSAID)",
+      "apply_at_egfr_below": 60,
+      "action": "avoid",
+      "recommendation": "Avoid NSAIDs in CKD — nephrotoxicity and hyperkalaemia risk."
+    },
+    {
+      "name": "atenolol",
+      "aliases": ["tenormin"],
+      "renal_handling": "renally cleared beta-blocker",
+      "apply_at_egfr_below": 35,
+      "action": "reduce",
+      "recommendation": "Accumulates in renal impairment — reduce dose; consider a hepatically-cleared beta-blocker (e.g. metoprolol, bisoprolol)."
+    },
+    {
+      "name": "allopurinol",
+      "aliases": ["zyloric"],
+      "renal_handling": "active metabolite renally cleared",
+      "apply_at_egfr_below": 60,
+      "action": "reduce",
+      "recommendation": "Reduce dose per eGFR and titrate to urate; accumulation increases hypersensitivity/toxicity risk."
+    },
+    {
+      "name": "nitrofurantoin",
+      "aliases": ["macrobid", "macrodantin"],
+      "renal_handling": "requires adequate urinary concentration",
+      "apply_at_egfr_below": 30,
+      "action": "avoid",
+      "recommendation": "Avoid at eGFR <30 — inadequate urinary levels (ineffective) plus increased systemic toxicity (neuropathy, pulmonary)."
+    },
+    {
+      "name": "spironolactone",
+      "aliases": ["aldactone"],
+      "renal_handling": "potassium-sparing diuretic",
+      "apply_at_egfr_below": 30,
+      "action": "avoid",
+      "recommendation": "Hyperkalaemia risk in CKD — avoid or use only with close potassium monitoring at eGFR <30."
+    },
+    {
+      "name": "enoxaparin",
+      "aliases": ["clexane", "lovenox", "lmwh"],
+      "renal_handling": "renally cleared (LMWH)",
+      "apply_at_egfr_below": 30,
+      "action": "reduce",
+      "recommendation": "Reduce treatment dose and/or monitor anti-Xa at eGFR <30 — accumulation increases bleeding risk."
+    },
+    {
+      "name": "lisinopril",
+      "aliases": ["zestril", "acei", "ace inhibitor"],
+      "renal_handling": "reno-protective but needs monitoring",
+      "apply_at_egfr_below": 90,
+      "action": "monitor",
+      "recommendation": "Monitor potassium and creatinine after initiation/uptitration; expect a small creatinine rise. Withhold during acute illness/volume depletion (sick-day rules)."
+    },
+    {
+      "name": "ciprofloxacin",
+      "aliases": ["cipro", "ciproxin"],
+      "renal_handling": "partially renally cleared",
+      "apply_at_egfr_below": 30,
+      "action": "reduce",
+      "recommendation": "Reduce dose / extend interval at eGFR <30."
+    },
+    {
+      "name": "tramadol",
+      "aliases": ["zydol", "ultram"],
+      "renal_handling": "active metabolite renally cleared",
+      "apply_at_egfr_below": 30,
+      "action": "reduce",
+      "recommendation": "Extend dosing interval / reduce dose at eGFR <30 — accumulation of active metabolite increases sedation and seizure risk."
+    }
+  ],
+  "disclaimer": "Decision support only — not a substitute for clinical judgement. eGFR here is ESTIMATED from CKD stage, not measured; actual dosing depends on measured renal function, weight, indication and the specific product. Verify against a current renal dosing reference and consult a pharmacist."
+}

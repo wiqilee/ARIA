@@ -29,8 +29,11 @@ from pipeline.intake import intake
 from pipeline.normalize import normalize
 from pipeline.phenotype_scorer import phenotype_score
 from pipeline.plan_generator import plan_generate
+from pipeline.renal_adjuster import renal_adjust
+from pipeline.appropriateness_screener import appropriateness_screen
 from pipeline.report_builder import report_build
 from pipeline.temporal_modeler import temporal_model
+from pipeline.consistency_check import consistency_check
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +65,8 @@ class PipelineState(TypedDict, total=False):
     temporal: dict[str, Any]
     evidence: list[dict[str, Any]]
     graded_interactions: list[dict[str, Any]]
+    renal_assessment: dict[str, Any]
+    appropriateness: dict[str, Any]
 
     # After plan_generate
     deprescribing_plan: dict[str, Any]
@@ -95,9 +100,10 @@ async def _safe_node(node_func, state: dict, name: str, errors: list[str]) -> di
 
 
 async def parallel_fanout(state: dict[str, Any]) -> dict[str, Any]:
-    """Run phenotype_score, temporal_model, and evidence_grade concurrently.
+    """Run phenotype_score, temporal_model, evidence_grade, renal_adjust and
+    appropriateness_screen concurrently.
 
-    All three nodes consume the same upstream inputs (drugs, patient,
+    All five nodes consume the same upstream inputs (drugs, patient,
     interactions, interaction_graph) and never mutate shared state, so
     they can be launched in parallel. asyncio.gather() turns the longest
     of three into the wall-clock time, instead of the sum.
@@ -112,7 +118,7 @@ async def parallel_fanout(state: dict[str, Any]) -> dict[str, Any]:
     """
     errors = list(state.get("errors", []))
 
-    logger.info("Phase 2 fan-out: launching 3 parallel stages")
+    logger.info("Phase 2 fan-out: launching 5 parallel stages")
 
     # Each node receives its own shallow copy of the state. Because the
     # nodes do not mutate state in place (they return dict-merges),
@@ -120,20 +126,30 @@ async def parallel_fanout(state: dict[str, Any]) -> dict[str, Any]:
     phenotype_task = _safe_node(phenotype_score, dict(state), "phenotype_score", errors)
     temporal_task = _safe_node(temporal_model, dict(state), "temporal_model", errors)
     evidence_task = _safe_node(evidence_grade, dict(state), "evidence_grade", errors)
-
-    phenotype_out, temporal_out, evidence_out = await asyncio.gather(
-        phenotype_task,
-        temporal_task,
-        evidence_task,
+    renal_task = _safe_node(renal_adjust, dict(state), "renal_adjust", errors)
+    appropriateness_task = _safe_node(
+        appropriateness_screen, dict(state), "appropriateness_screen", errors
     )
 
-    logger.info("Phase 2 fan-out: 3 parallel stages joined")
+    phenotype_out, temporal_out, evidence_out, renal_out, appropriateness_out = (
+        await asyncio.gather(
+            phenotype_task,
+            temporal_task,
+            evidence_task,
+            renal_task,
+            appropriateness_task,
+        )
+    )
 
-    # Merge all three node outputs into one dict-update for LangGraph.
+    logger.info("Phase 2 fan-out: parallel stages joined")
+
+    # Merge all node outputs into one dict-update for LangGraph.
     merged: dict[str, Any] = {}
     merged.update(phenotype_out)
     merged.update(temporal_out)
     merged.update(evidence_out)
+    merged.update(renal_out)
+    merged.update(appropriateness_out)
 
     # Carry forward any errors collected during parallel execution
     if errors != state.get("errors", []):
@@ -164,6 +180,7 @@ def build_pipeline() -> StateGraph:
     graph.add_node("parallel_fanout", parallel_fanout)
     graph.add_node("plan_generate", plan_generate)
     graph.add_node("report_build", report_build)
+    graph.add_node("consistency_check", consistency_check)
 
     # Define edges
     graph.set_entry_point("intake")
@@ -172,7 +189,8 @@ def build_pipeline() -> StateGraph:
     graph.add_edge("graph_build", "parallel_fanout")
     graph.add_edge("parallel_fanout", "plan_generate")
     graph.add_edge("plan_generate", "report_build")
-    graph.add_edge("report_build", END)
+    graph.add_edge("report_build", "consistency_check")
+    graph.add_edge("consistency_check", END)
 
     return graph.compile()
 

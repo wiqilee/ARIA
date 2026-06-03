@@ -144,6 +144,60 @@ export interface BurdenScores {
   total_burden_summary: string;
 }
 
+// ── Renal dosing ────────────────────────────────────────────
+
+export type RenalAction =
+  | "reduce"
+  | "avoid"
+  | "monitor"
+  | "adjust"
+  | "no_change";
+
+export interface RenalDrugAdjustment {
+  drug: string;
+  renal_handling: string;
+  action: RenalAction | string;
+  recommendation: string;
+  egfr_threshold?: number | null;
+}
+
+export interface RenalAssessment {
+  ckd_stage: number;
+  estimated_egfr_range: string;
+  flagged: RenalDrugAdjustment[];
+  ok: string[];
+  summary: string;
+  disclaimer: string;
+}
+
+// ── Appropriateness (Beers / STOPP-START) ───────────────────
+
+export interface AppropriatenessFlag {
+  drug: string;
+  /** "beers" | "stopp" */
+  framework: string;
+  criterion: string;
+  rationale: string;
+  recommendation: string;
+}
+
+export interface PrescribingOmission {
+  omission: string;
+  criterion: string;
+  triggered_by: string;
+  rationale: string;
+  recommendation: string;
+}
+
+export interface AppropriatenessAssessment {
+  age: number;
+  screened: boolean;
+  pim_flags: AppropriatenessFlag[];
+  omissions: PrescribingOmission[];
+  summary: string;
+  disclaimer: string;
+}
+
 // ── Temporal ────────────────────────────────────────────────
 
 export interface DailyRisk {
@@ -198,6 +252,8 @@ export interface ClinicalReport {
   critical_findings: string[];
   risk_scores: RiskScore[];
   burden_scores?: BurdenScores;
+  renal_assessment?: RenalAssessment;
+  appropriateness?: AppropriatenessAssessment;
   temporal_summary?: string;
   deprescribing_plan?: DeprescribingPlan;
   evidence_citations: string[];

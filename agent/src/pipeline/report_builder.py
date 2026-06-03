@@ -302,6 +302,22 @@ async def report_build(state: dict[str, Any]) -> dict[str, Any]:
             drugs, patient, interactions, risk_scores, overall_risk, errors
         )
 
+    # Attach the renal dosing assessment (computed in the parallel fan-out by
+    # renal_adjuster) to whatever report we ended up with — normal or fallback.
+    # The artifact renderer in main.py and the RenalDosing.tsx component read
+    # report["renal_assessment"].
+    renal_assessment = state.get("renal_assessment")
+    if renal_assessment:
+        report["renal_assessment"] = renal_assessment
+
+    # Attach the geriatric appropriateness screen (Beers/STOPP/START),
+    # computed in the parallel fan-out by appropriateness_screener. The
+    # artifact renderer in main.py and the AppropriatenessFlags.tsx component
+    # read report["appropriateness"].
+    appropriateness = state.get("appropriateness")
+    if appropriateness:
+        report["appropriateness"] = appropriateness
+
     return {
         "report": report,
         "errors": errors,

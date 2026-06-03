@@ -1,0 +1,177 @@
+{
+  "schema": "aria.appropriateness/v1",
+  "source_note": "Conservative, qualitative geriatric prescribing decision support compiled from the AGS Beers Criteria (2023 update) and STOPP/START criteria (version 3, 2023). Criterion text is paraphrased for decision support and is NOT a verbatim reproduction. The age threshold for screening is 65 by default (the population these frameworks target). Verify every flag against the current published criteria and clinical context before acting.",
+  "age_threshold": 65,
+  "beers": [
+    {
+      "drug": "diphenhydramine",
+      "aliases": ["benadryl", "nytol"],
+      "criterion": "Beers 2023: first-generation antihistamine",
+      "category": "PIM",
+      "rationale": "Highly anticholinergic; clearance reduced with age. Risk of confusion, dry mouth, constipation, urinary retention. Avoid as a hypnotic.",
+      "recommendation": "Avoid in adults \u226565. Prefer a non-anticholinergic agent; for allergy use a second-generation antihistamine."
+    },
+    {
+      "drug": "amitriptyline",
+      "aliases": ["elavil", "tca"],
+      "criterion": "Beers 2023: tertiary tricyclic antidepressant",
+      "category": "PIM",
+      "rationale": "Strongly anticholinergic and sedating; orthostatic hypotension and fall risk.",
+      "recommendation": "Avoid in adults \u226565. If an antidepressant is needed, prefer an SSRI/SNRI with monitoring."
+    },
+    {
+      "drug": "diazepam",
+      "aliases": ["valium"],
+      "criterion": "Beers 2023: long-acting benzodiazepine",
+      "category": "PIM",
+      "rationale": "Increased sensitivity and decreased metabolism of long-acting benzodiazepines in older adults; risk of cognitive impairment, falls, fractures, delirium.",
+      "recommendation": "Avoid in adults \u226565 for insomnia/agitation. Taper rather than stop abruptly; treat underlying cause."
+    },
+    {
+      "drug": "lorazepam",
+      "aliases": ["ativan"],
+      "criterion": "Beers 2023: benzodiazepine",
+      "category": "PIM",
+      "rationale": "Benzodiazepines increase risk of cognitive impairment, delirium, falls and fractures in older adults.",
+      "recommendation": "Avoid routine use in adults \u226565; reserve for specific indications (e.g. severe GAD, procedural). Taper if chronic."
+    },
+    {
+      "drug": "zolpidem",
+      "aliases": ["ambien", "stilnox"],
+      "criterion": "Beers 2023: non-benzodiazepine 'Z-drug' hypnotic",
+      "category": "PIM",
+      "rationale": "Adverse events similar to benzodiazepines (delirium, falls, fractures); minimal improvement in sleep latency/duration.",
+      "recommendation": "Avoid in adults \u226565. Use non-pharmacological sleep measures first."
+    },
+    {
+      "drug": "glyburide",
+      "aliases": ["glibenclamide", "glbenclamide", "daonil"],
+      "criterion": "Beers 2023: long-acting sulfonylurea",
+      "category": "PIM",
+      "rationale": "Prolonged hypoglycaemia risk in older adults.",
+      "recommendation": "Avoid in adults \u226565. Prefer a shorter-acting agent (e.g. glipizide) or an alternative class."
+    },
+    {
+      "drug": "indomethacin",
+      "aliases": ["indocin", "indocid"],
+      "criterion": "Beers 2023: NSAID (indomethacin has highest CNS adverse effects)",
+      "category": "PIM",
+      "rationale": "GI bleeding/peptic ulcer risk, acute kidney injury, fluid retention; indomethacin has the most CNS effects of the NSAIDs.",
+      "recommendation": "Avoid chronic use in adults \u226565 unless other options ineffective and with gastroprotection. Prefer paracetamol."
+    },
+    {
+      "drug": "ketorolac",
+      "aliases": ["toradol"],
+      "criterion": "Beers 2023: NSAID",
+      "category": "PIM",
+      "rationale": "High GI bleeding and acute kidney injury risk in older adults.",
+      "recommendation": "Avoid in adults \u226565."
+    },
+    {
+      "drug": "chlorpheniramine",
+      "aliases": ["chlorphenamine", "piriton"],
+      "criterion": "Beers 2023: first-generation antihistamine",
+      "category": "PIM",
+      "rationale": "Anticholinergic burden; confusion, sedation, anticholinergic toxicity.",
+      "recommendation": "Avoid in adults \u226565; prefer a second-generation antihistamine."
+    },
+    {
+      "drug": "doxazosin",
+      "aliases": ["cardura"],
+      "criterion": "Beers 2023: peripheral alpha-1 blocker for hypertension",
+      "category": "PIM",
+      "rationale": "High risk of orthostatic hypotension; not recommended as routine antihypertensive in older adults.",
+      "recommendation": "Avoid as an antihypertensive in adults \u226565; acceptable for BPH with caution."
+    },
+    {
+      "drug": "amiodarone",
+      "aliases": ["cordarone", "pacerone"],
+      "criterion": "Beers 2023: antiarrhythmic, first-line rhythm control",
+      "category": "PIM",
+      "rationale": "Greater toxicities (thyroid, pulmonary, QT) than other antiarrhythmics; avoid as first-line for atrial fibrillation unless heart failure or LVH.",
+      "recommendation": "Avoid as first-line for AF rate/rhythm control in adults \u226565 unless specific indication."
+    },
+    {
+      "drug": "oxybutynin",
+      "aliases": ["ditropan"],
+      "criterion": "Beers 2023: anticholinergic for overactive bladder",
+      "category": "PIM",
+      "rationale": "Anticholinergic; confusion, dry mouth, constipation, falls; cumulative anticholinergic burden.",
+      "recommendation": "Use with caution / avoid in adults \u226565, especially with other anticholinergics or cognitive impairment."
+    },
+    {
+      "drug": "promethazine",
+      "aliases": ["phenergan"],
+      "criterion": "Beers 2023: first-generation antihistamine",
+      "category": "PIM",
+      "rationale": "Sedating, anticholinergic; confusion and fall risk.",
+      "recommendation": "Avoid in adults \u226565."
+    }
+  ],
+  "stopp": [
+    {
+      "drug": "aspirin",
+      "aliases": ["acetylsalicylic acid", "asa"],
+      "criterion": "STOPP v3: antiplatelet without an established indication",
+      "category": "PIM",
+      "condition_note": "Flag when used for primary prevention without documented cardiovascular disease.",
+      "rationale": "Aspirin for primary prevention in older adults: bleeding risk often outweighs benefit.",
+      "recommendation": "Review the indication. If primary prevention only, reassess against bleeding risk; deprescribe where benefit is unclear."
+    },
+    {
+      "drug": "digoxin",
+      "aliases": ["lanoxin"],
+      "criterion": "STOPP v3: digoxin as first-line in heart failure with preserved ejection fraction",
+      "category": "PIM",
+      "rationale": "Limited benefit; narrow therapeutic index and toxicity risk in older adults, especially with renal impairment.",
+      "recommendation": "Review indication and dose; verify renal function and serum level (see also renal dosing assessment)."
+    },
+    {
+      "drug": "proton pump inhibitor",
+      "aliases": ["omeprazole", "pantoprazole", "esomeprazole", "lansoprazole", "ppi"],
+      "criterion": "STOPP v3: PPI at full therapeutic dose for >8 weeks without indication for maintenance",
+      "category": "PIM",
+      "rationale": "Prolonged full-dose PPI without ongoing indication: C. difficile, fracture, hypomagnesaemia, B12 deficiency risk.",
+      "recommendation": "Review duration/indication; step down to lowest effective dose or deprescribe if no maintenance indication."
+    }
+  ],
+  "start": [
+    {
+      "omission": "statin",
+      "aliases": ["atorvastatin", "simvastatin", "rosuvastatin", "hmg-coa reductase inhibitor"],
+      "criterion": "START v3: statin therapy with documented atherosclerotic cardiovascular disease",
+      "category": "omission",
+      "trigger_comorbidities": ["coronary artery disease", "cad", "ischaemic heart disease", "stroke", "tia", "peripheral vascular disease", "myocardial infarction"],
+      "rationale": "Statins reduce cardiovascular events in older adults with established ASCVD where life expectancy is reasonable.",
+      "recommendation": "Consider starting a statin if documented ASCVD and not already prescribed, absent contraindication or limited life expectancy."
+    },
+    {
+      "omission": "ACE inhibitor or ARB",
+      "aliases": ["lisinopril", "ramipril", "enalapril", "losartan", "candesartan", "acei", "arb"],
+      "criterion": "START v3: ACE inhibitor (or ARB) in heart failure and/or ischaemic heart disease",
+      "category": "omission",
+      "trigger_comorbidities": ["heart failure", "chf", "hfref", "ischaemic heart disease", "coronary artery disease", "cad", "diabetic nephropathy"],
+      "rationale": "RAAS inhibition improves outcomes in heart failure with reduced EF and proteinuric kidney disease.",
+      "recommendation": "Consider starting an ACE inhibitor/ARB if indicated and not prescribed, with renal function and potassium monitoring."
+    },
+    {
+      "omission": "beta-blocker",
+      "aliases": ["bisoprolol", "metoprolol", "carvedilol", "nebivolol"],
+      "criterion": "START v3: beta-blocker in stable systolic heart failure and/or post-myocardial infarction",
+      "category": "omission",
+      "trigger_comorbidities": ["heart failure", "hfref", "myocardial infarction", "post-mi", "ischaemic heart disease"],
+      "rationale": "Evidence-based beta-blockers reduce mortality in HFrEF and after MI.",
+      "recommendation": "Consider starting an evidence-based beta-blocker if indicated and not prescribed, absent contraindication."
+    },
+    {
+      "omission": "vitamin D / bisphosphonate",
+      "aliases": ["alendronate", "risedronate", "vitamin d", "colecalciferol", "cholecalciferol", "zoledronic acid"],
+      "criterion": "START v3: bone antiresorptive / vitamin D in osteoporosis or prior fragility fracture",
+      "category": "omission",
+      "trigger_comorbidities": ["osteoporosis", "fragility fracture", "hip fracture", "vertebral fracture"],
+      "rationale": "Antiresorptive therapy plus vitamin D reduces fracture risk in osteoporosis / after fragility fracture.",
+      "recommendation": "Consider starting bone protection (with calcium/vitamin D) if osteoporosis or prior fragility fracture and not prescribed."
+    }
+  ],
+  "disclaimer": "Decision support only — not a substitute for clinical judgement. Criteria are paraphrased from the AGS Beers Criteria (2023) and STOPP/START v3 (2023) and may not reflect the most recent published update. PIM and omission flags depend on the full clinical picture (indication, life expectancy, patient goals, prior trials). Always verify against the current published criteria and a pharmacist or geriatrician before changing therapy."
+}

@@ -31,7 +31,7 @@
 - [The Solution](#the-solution)
 - [The Impact](#the-impact)
 - [What Makes ARIA Different](#what-makes-aria-different)
-  - [Ten Capabilities You Will Not Find Anywhere Else](#ten-capabilities-you-will-not-find-anywhere-else)
+  - [Twelve Capabilities You Will Not Find Anywhere Else](#twelve-capabilities-you-will-not-find-anywhere-else)
   - [Novelty Comparison](#novelty-comparison)
 - [System Architecture](#system-architecture)
   - [System Overview](#system-overview)
@@ -65,6 +65,7 @@
 - [Getting Started (Local Development)](#getting-started-local-development)
 - [Data and Privacy](#data-and-privacy)
 - [Roadmap](#roadmap)
+- [Post-Hackathon Feature Increments](#post-hackathon-feature-increments)
 - [License](#license)
 - [Built By](#built-by)
 
@@ -139,7 +140,7 @@ Alert fatigue is not a behavior problem. It is a tool design problem. ARIA is th
 
 ## What Makes ARIA Different
 
-### Ten Capabilities You Will Not Find Anywhere Else
+### Twelve Capabilities You Will Not Find Anywhere Else
 
 #### 1. Temporal Cascade Modeling
 Drug interactions do not all happen at once. They unfold over hours, days, and weeks. ARIA models the **timeline of risk** so a clinician knows when an interaction will actually peak and when to intervene, not just whether it exists.
@@ -192,7 +193,27 @@ Prompt Opinion sends patient context
 Zero manual data entry. End-to-end in one agent call.
 ```
 
-### Novelty Comparison
+#### 11. CKD/eGFR-Aware Renal Dosing
+A patient on CKD stage 3 with digoxin (renally eliminated) and furosemide does not just need an interaction flag, they need a **dose decision**. ARIA's `assess_renal_dosing` tool flags each renally-handled drug with a concrete action (`reduce`, `avoid`, `monitor`, `adjust`, or `no_change`) against an eGFR band estimated from CKD stage. It is **deterministic and rule-based** (a 16-drug reference set compiled into the binary), not LLM-generated, so dose guidance carries no model variance or hallucination risk. Every result ships with an explicit disclaimer that eGFR is estimated from stage, not measured.
+
+```
+Patient: CKD stage 3
+digoxin     -> REDUCE   (narrow therapeutic index, renal elimination)
+furosemide  -> MONITOR  (electrolytes; potentiates digoxin toxicity)
+others      -> clear
+```
+
+#### 12. Geriatric Prescribing Appropriateness (Beers + STOPP/START)
+For a patient 65 or older, "is there an interaction?" is only half the question. The other half is "should this drug be here at all, and is something missing?" ARIA's `screen_appropriateness` tool flags **potentially inappropriate medications** against the **AGS Beers Criteria** and **STOPP** criteria, and flags **prescribing omissions** against **START** criteria, each tied to the specific named criterion a clinician already recognizes. Like renal dosing, it is **deterministic and rule-based** (criteria compiled into the binary), not LLM-generated. Below the screening age it returns cleanly unscreened, so it never fires on patients these frameworks were not written for.
+
+```
+Patient: age 72, CAD, osteoporosis
+PIM    diazepam       -> Beers: long-acting benzodiazepine (falls, delirium)
+PIM    amitriptyline  -> Beers: anticholinergic tricyclic
+PIM    aspirin        -> STOPP: antiplatelet without established indication
+OMIT   statin         -> START: ASCVD documented, statin absent
+OMIT   bone protection-> START: osteoporosis, no antiresorptive
+```
 
 | Capability | Existing Tools | ARIA |
 |-----------|---------------|------|
@@ -250,6 +271,8 @@ flowchart LR
     E["⏱️ Temporal Model\nCascade timeline"] -->
     F["📚 Evidence Grade\nPubMed citations"] -->
     G["💊 Deprescribing Plan\nPrioritized actions"] -->
+    R["🫘 Renal Dosing\nCKD/eGFR dose flags"] -->
+    S["🩺 Appropriateness\nBeers / STOPP-START"] -->
     H["📄 Report\nStructured clinical output"]
 ```
 
@@ -457,6 +480,8 @@ ARIA/
 │   │   │   ├── temporal_cascade.rs     # Timeline risk cascade modeling
 │   │   │   ├── deprescribing_plan.rs   # Prioritized deprescribing optimizer
 │   │   │   ├── fhir_patient_medications.rs # FHIR R4 medication ingestion (HAPI / partner EHR)
+│   │   │   ├── renal_dosing.rs         # Deterministic CKD/eGFR-aware dose-adjustment flags (rule-based)
+│   │   │   ├── appropriateness.rs      # Deterministic Beers/STOPP PIM + START omission screen (rule-based)
 │   │   │   └── generate_report.rs      # Structured clinical report output
 │   │   ├── api/
 │   │   │   ├── openfda.rs              # OpenFDA API client
@@ -469,7 +494,10 @@ ARIA/
 │   │   │   ├── drug.rs                 # Drug struct and normalization
 │   │   │   ├── patient.rs              # PatientContext and phenotype fields
 │   │   │   ├── interaction.rs          # Interaction report types
-│   │   │   └── risk.rs                 # RiskScore, BurdenScores, CascadeModel
+│   │   │   └── risk.rs                 # RiskScore, BurdenScores, CascadeModel, RenalAssessment, AppropriatenessAssessment
+│   │   ├── data/
+│   │   │   ├── renal_dosing.json       # eGFR thresholds per drug (16-drug reference set, include_str!)
+│   │   │   └── beers_stopp.json        # AGS Beers + STOPP/START criteria (paraphrased, with citations)
 │   │   └── llm/
 │   │       ├── mod.rs                  # LLM client abstraction layer
 │   │       └── reasoning.rs            # All Gemini 2.5 Pro prompt templates
@@ -490,7 +518,10 @@ ARIA/
 │   │   │   ├── temporal_modeler.py     # Cascade timeline projection step
 │   │   │   ├── evidence_grader.py      # PubMed evidence attachment step
 │   │   │   ├── plan_generator.py       # Deprescribing plan generation step
-│   │   │   └── report_builder.py       # Final structured report assembly step
+│   │   │   ├── renal_adjuster.py       # CKD/eGFR-aware renal dosing step (calls assess_renal_dosing)
+│   │   │   ├── appropriateness_screener.py # Beers/STOPP/START screen step (calls screen_appropriateness)
+│   │   │   ├── report_builder.py       # Final structured report assembly step
+│   │   │   └── consistency_check.py    # Final guardrail: assert rendered label == severity_label_for_score(score)
 │   │   ├── mcp_client/
 │   │   │   ├── client.py               # Async HTTP MCP client
 │   │   │   └── schema.py               # Pydantic models for all tool I/O
@@ -542,7 +573,7 @@ ARIA/
 │   │   │   │   ├── DrugInput.tsx       # Single drug entry with autocomplete
 │   │   │   │   └── PatientContextForm.tsx    # Age, sex, CKD stage, comorbidities
 │   │   │   ├── report/
-│   │   │   │   ├── RiskReport.tsx      # Structured report with burden scores, interactions, deprescribing, citations
+│   │   │   │   ├── RiskReport.tsx      # Structured report: burden, renal dosing, appropriateness, interactions, deprescribing, citations
 │   │   │   │   ├── InteractionCard.tsx # Single interaction detail card
 │   │   │   │   ├── EvidenceBadge.tsx   # A/B/C/D evidence grade badge
 │   │   │   │   ├── SeverityMeter.tsx   # Animated 0-10 risk meter with deterministic label (uses lib/severity.ts)
@@ -659,6 +690,8 @@ model_temporal_cascade(drugs: Vec<Drug>, timeline: Timeline)          -> Cascade
 generate_deprescribing_plan(analysis: FullAnalysis)                   -> DeprescribingPlan
 generate_report(analysis: FullAnalysis)                               -> ClinicalReport
 fhir_patient_medications(patient_id: String, bearer: Option<String>)  -> FhirMedicationList
+assess_renal_dosing(drugs: Vec<Drug>, context: PatientContext)        -> RenalAssessment
+screen_appropriateness(drugs: Vec<Drug>, context: PatientContext)     -> AppropriatenessAssessment
 ```
 
 ### Frontend Design System
@@ -1140,9 +1173,33 @@ In production, the FHIR endpoint is replaced with the partner EHR's FHIR server,
 - [x] About page with project overview, capabilities, and usage guide
 - [x] FHIR R4 medication resource ingestion via `fhir_patient_medications` MCP tool
 - [x] SHARP Extension Specs propagation for multi-agent FHIR context
+- [x] CKD/eGFR-aware renal dosing assessment via deterministic, rule-based `assess_renal_dosing` MCP tool (16-drug reference set, no LLM variance)
 - [ ] Pharmacogenomics layer with CYP genotype integration
+- [x] Geriatric appropriateness screening (AGS Beers + STOPP/START) via deterministic, rule-based `screen_appropriateness` MCP tool
+- [ ] Interactive "what-if" deprescribing simulator (real-time regimen re-scoring)
 - [ ] EHR plugin compatible with Epic and Cerner
 - [ ] Real-time ICU polypharmacy monitoring dashboard
+
+---
+
+## Post-Hackathon Feature Increments
+
+Three clinical-depth increments were added after the hackathon, each following the same architectural pattern and the project's anti-alert-fatigue thesis: patient-specific, actionable output rather than more undifferentiated warnings. The execution order was deliberate — **A** protects trust, **B** and **C** add clinical depth.
+
+### A — Score/Label Consistency Guardrail
+A final pipeline node (`agent/src/pipeline/consistency_check.py`) asserts that every rendered severity **Level** is derived from the same numeric score via `severity_label_for_score()`, on every surface (Vercel, A2A/Prompt Opinion, PDF). A CI unit test fails the build if a randomly-scored case ever renders a label that disagrees with the canonical mapping. This closes the score↔label bug class at the source. The deterministic mapping itself is mirrored across the Rust server, the Python agent, and the frontend `severity.ts`.
+
+### B — CKD/eGFR-Aware Renal Dosing
+The `assess_renal_dosing` MCP tool (`mcp-server/src/tools/renal_dosing.rs`, data in `mcp-server/src/data/renal_dosing.json`) flags each renally-handled drug with a concrete action (`reduce` / `avoid` / `monitor` / `adjust` / `no_change`) against an eGFR band estimated from CKD stage. It is **deterministic and rule-based** (16-drug reference set, `include_str!`-embedded, no Gemini call) so dose guidance carries no model variance. The agent step is `renal_adjuster.py`; the UI renders as a Renal Dosing section inside `RiskReport.tsx`.
+
+### C — Geriatric Appropriateness (Beers + STOPP/START)
+The `screen_appropriateness` MCP tool (`mcp-server/src/tools/appropriateness.rs`, data in `mcp-server/src/data/beers_stopp.json`) screens patients aged 65+ for **potentially inappropriate medications** (AGS Beers + STOPP) and **prescribing omissions** (START), each tied to its named criterion. Also **deterministic and rule-based**, with the same below-age clean exit. The agent step is `appropriateness_screener.py`; the UI renders as an Appropriateness section inside `RiskReport.tsx`.
+
+Both B and C run inside the existing parallel fan-out (alongside phenotype scoring, temporal modelling, and evidence grading), attach their structured result onto the report in `report_builder.py`, surface in the Prompt Opinion A2A artifact via the renderer in `agent/src/main.py`, and are typed in `frontend/src/lib/types.ts`.
+
+> **Criteria currency note:** the Beers/STOPP-START dataset paraphrases the AGS Beers Criteria (2023) and STOPP/START v3 (2023). Criterion text is summarized for decision support, not reproduced verbatim, and should be verified against the current published editions before clinical use.
+
+> **Integration prerequisites** (see `INTEGRATION.md` in the increment bundle): none outstanding. The new Rust structs are already exported by `models/mod.rs` (`pub use risk::*;`), and the renal + appropriateness sections render inline inside `RiskReport.tsx`, so there is no separate card to mount. Replace the listed files and deploy Rust → Python → frontend.
 
 ---
 
