@@ -122,21 +122,40 @@ TASK_STORE = TaskStore()
 # ── Lifespan ────────────────────────────────────────────────
 
 
+async def _probe_mcp_server() -> None:
+    """Best-effort MCP reachability probe.
+
+    Runs as a background task so it never blocks application startup. On
+    Cloud Run the container must bind PORT within a short window; doing a
+    network round-trip to the (separately cold-starting) MCP server inside
+    lifespan before `yield` can delay the bind past that window and make the
+    revision fail with "container failed to start and listen on PORT". The
+    agent already retries MCP on every request, so this probe is purely
+    informational.
+    """
+    try:
+        healthy = await mcp_client.health_check()
+        if healthy:
+            logger.info("MCP server at %s is healthy", MCP_SERVER_URL)
+            try:
+                init = await mcp_client.initialize()
+                logger.info("MCP session initialized: %s", init.get("serverInfo", {}))
+            except Exception as e:
+                logger.warning("MCP initialize failed (non-fatal): %s", e)
+        else:
+            logger.warning(
+                "MCP server at %s is not reachable, agent will retry on requests",
+                MCP_SERVER_URL,
+            )
+    except Exception as e:  # never let the probe crash anything
+        logger.warning("MCP startup probe failed (non-fatal): %s", e)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    healthy = await mcp_client.health_check()
-    if healthy:
-        logger.info("MCP server at %s is healthy", MCP_SERVER_URL)
-        try:
-            init = await mcp_client.initialize()
-            logger.info("MCP session initialized: %s", init.get("serverInfo", {}))
-        except Exception as e:
-            logger.warning("MCP initialize failed (non-fatal): %s", e)
-    else:
-        logger.warning(
-            "MCP server at %s is not reachable, agent will retry on requests",
-            MCP_SERVER_URL,
-        )
+    # Kick the MCP probe off in the background so the port binds immediately.
+    # Do NOT await it here — awaiting blocks the bind on Cloud Run.
+    probe_task = asyncio.create_task(_probe_mcp_server())
     logger.info("Public agent URL: %s", PUBLIC_AGENT_URL)
     logger.info("A2A protocol version: %s", A2A_PROTOCOL_VERSION)
     logger.info(
@@ -146,6 +165,7 @@ async def lifespan(app: FastAPI):
         DEBUG_A2A,
     )
     yield
+    probe_task.cancel()
     logger.info("ARIA Agent shutting down")
 
 

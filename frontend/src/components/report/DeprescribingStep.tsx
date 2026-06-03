@@ -86,7 +86,10 @@ export function DeprescribingStep({ step, index }: DeprescribingStepProps) {
           {step.rationale}
         </p>
 
-        {/* Monitoring chips — same readability bump. */}
+        {/* Monitoring chips — borders now use the card's action color at low
+            opacity (soft) so each chip's edge is visible and clearly tied to
+            this step, instead of the near-invisible dark navy border. Kept
+            subtle since these are small supporting details. */}
         {step.monitoring.length > 0 && (
           <div className="flex flex-wrap gap-1.5 mb-2">
             {step.monitoring.map((m, i) => (
@@ -95,8 +98,8 @@ export function DeprescribingStep({ step, index }: DeprescribingStepProps) {
                 className="text-[10px] font-mono px-2 py-0.5 rounded"
                 style={{
                   color: "#a8b8d0",
-                  background: "rgba(2, 8, 23, 0.6)",
-                  border: "1px solid rgba(30, 58, 95, 0.6)",
+                  background: `${style.color}0d`,
+                  border: `1px solid ${style.color}33`,
                 }}
               >
                 {m}

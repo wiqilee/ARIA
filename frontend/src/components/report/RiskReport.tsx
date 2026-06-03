@@ -744,6 +744,66 @@ export function RiskReport({ data }: RiskReportProps) {
                 {deprescribing_plan.summary}
               </p>
             )}
+
+            {/* At-a-glance action list, derived deterministically from the
+                steps so the reader sees the sequence before the narrative
+                prose. Each row: order, drug, action pill, timeline. */}
+            <div className="mb-4 space-y-1.5">
+              {deprescribing_plan.steps.map((step: any, i: number) => {
+                const act = String(step?.action || "").toLowerCase();
+                const aColor =
+                  act === "discontinue"
+                    ? "var(--danger)"
+                    : act === "reduce"
+                      ? "var(--warning)"
+                      : act === "substitute"
+                        ? SECTION_ACCENT.summary
+                        : SECTION_ACCENT.deprescribing;
+                return (
+                  <div
+                    key={`glance-${i}`}
+                    className="flex items-center gap-3 p-2 rounded-lg"
+                    style={{
+                      background: "rgba(3, 11, 26, 0.4)",
+                      border: `1px solid ${aColor}1f`,
+                    }}
+                  >
+                    <span
+                      className="flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-bold font-mono shrink-0"
+                      style={{ background: `${aColor}24`, color: aColor }}
+                    >
+                      {step?.priority ?? i + 1}
+                    </span>
+                    <span
+                      className="text-sm font-mono"
+                      style={{ color: "#d0daea" }}
+                    >
+                      {step?.drug ?? "—"}
+                    </span>
+                    <span
+                      className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded"
+                      style={{
+                        color: aColor,
+                        background: `${aColor}14`,
+                        border: `1px solid ${aColor}26`,
+                        letterSpacing: "0.1em",
+                      }}
+                    >
+                      {act || "review"}
+                      {step?.substitute ? ` → ${step.substitute}` : ""}
+                    </span>
+                    {step?.timeline && (
+                      <span
+                        className="text-[10px] ml-auto"
+                        style={{ color: "#7a8ba8" }}
+                      >
+                        {step.timeline}
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
             <div className="space-y-4">
               {deprescribing_plan.steps.map((step: any, i: number) => (
                 <DeprescribingStep key={i} step={step} index={i} />

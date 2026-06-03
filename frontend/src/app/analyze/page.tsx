@@ -123,7 +123,8 @@ export default function AnalyzePage() {
             <p className="text-text-secondary text-sm max-w-md mx-auto leading-relaxed">
               Enter medications and clinical context. ARIA will build an
               interaction graph, compute personalized risk, model temporal
-              cascades, and generate a deprescribing plan.
+              cascades, flag renal dose adjustments, screen for geriatric
+              appropriateness, and generate a deprescribing plan.
             </p>
           </motion.div>
 
