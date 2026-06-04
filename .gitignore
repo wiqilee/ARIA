@@ -126,3 +126,11 @@ build/
 .venv/
 venv/
 env/
+
+# Python virtual environments
+.venv/
+venv/
+env/
+agent/.venv_test/
+__pycache__/
+*.pyc
