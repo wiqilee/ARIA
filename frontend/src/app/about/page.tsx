@@ -516,7 +516,7 @@ export default function AboutPage() {
                   fontFamily: "var(--font-mono, ui-monospace)",
                 }}
               >
-                Solo Builder · Hackathon Submission
+                Solo Builder · Independent Open Source Project
               </div>
 
               {/* Avatar with multi-ring glow */}
@@ -540,7 +540,7 @@ export default function AboutPage() {
                   }}
                 >
                   <span className="text-4xl font-display font-black text-white drop-shadow-md">
-                    W
+                    WL
                   </span>
                 </div>
               </div>
@@ -613,23 +613,36 @@ export default function AboutPage() {
           </div>
         </RevealSection>
 
-        {/* ── Hackathon Badge ── */}
+        {/* ── Project Origin ── */}
         <RevealSection>
-          <div className="text-center">
-            <p className="text-text-muted text-xs">
-              Submitted to the{" "}
+          <div className="text-center max-w-xl mx-auto">
+            <p className="text-text-muted text-xs leading-relaxed">
+              ARIA was originally built for the{" "}
               <a
-                href="https://agents-assemble.devpost.com"
+                href="https://devpost.com/software/aria-adaptive-risk-intelligence-for-polypharmacy-assessment"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="transition-colors duration-300 hover:text-[#06b6d4]"
                 style={{ color: "#94a3b8" }}
               >
                 Agents Assemble: Healthcare AI Endgame Hackathon
-              </a>
+              </a>{" "}
+              (sponsored by Prompt Opinion, Darena Health).
             </p>
-            <p className="text-text-muted text-[10px] mt-1">
-              Sponsored by Prompt Opinion (Darena Health)
+            <p className="text-text-muted text-[11px] mt-2 leading-relaxed">
+              That hackathon has now concluded. ARIA is no longer in competition
+              and is maintained as an independent open source project, developed
+              and extended on a personal basis by{" "}
+              <a
+                href="https://x.com/wiqi_lee"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="transition-colors duration-300 hover:text-[#06b6d4]"
+                style={{ color: "#94a3b8" }}
+              >
+                @wiqi_lee
+              </a>
+              .
             </p>
           </div>
         </RevealSection>

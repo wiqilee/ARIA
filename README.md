@@ -415,7 +415,7 @@ Expected response: a JSON-RPC envelope where `result.task.status.state` is `"TAS
 
 ## Prompt Opinion Marketplace Integration
 
-ARIA is published to the [Prompt Opinion Marketplace](https://app.promptopinion.ai/marketplace/agent/019e07f1-1952-7b07-8a90-4274fdbe8b49) as part of the [Agents Assemble Hackathon](https://agents-assemble.devpost.com). The integration follows **Path B (A2A Agent)** as defined in the competition rules.
+ARIA is published to the [Prompt Opinion Marketplace](https://app.promptopinion.ai/marketplace/agent/019e07f1-1952-7b07-8a90-4274fdbe8b49). It was originally built for the [Agents Assemble Hackathon](https://agents-assemble.devpost.com) following **Path B (A2A Agent)** as defined in the competition rules. That hackathon has since concluded; ARIA is now maintained as an independent open source project, and the marketplace integration remains live.
 
 ### Integration Flow
 
@@ -1219,8 +1219,8 @@ This project is licensed under the MIT License. See the [LICENSE](LICENSE) file 
 
 ---
 
-*Submitted to the [Agents Assemble: Healthcare AI Endgame Hackathon](https://devpost.com/software/aria-adaptive-risk-intelligence-for-polypharmacy-assessment)*
-*Sponsored by Prompt Opinion (Darena Health)*
+*Originally built for the [Agents Assemble: Healthcare AI Endgame Hackathon](https://devpost.com/software/aria-adaptive-risk-intelligence-for-polypharmacy-assessment), sponsored by Prompt Opinion (Darena Health).*
+*That hackathon has concluded. ARIA is now maintained as an independent open source project, developed on a personal basis by [Wiqi Lee](https://x.com/wiqi_lee).*
 
 <div align="center">
 <sub>Built with Rust, Python, LangGraph, Gemini 2.5 Pro, Google Cloud Run (asia-southeast2), Vercel, and React Three Fiber</sub>
