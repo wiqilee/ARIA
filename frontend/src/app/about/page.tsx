@@ -412,7 +412,7 @@ export default function AboutPage() {
         <RevealSection className="mb-24">
           <GlowCard accentColor="#8b5cf6">
             <h2 className="font-display font-bold text-2xl mb-6">
-              <span style={{ color: "#8b5cf6" }}>8 Capabilities</span>{" "}
+              <span style={{ color: "#8b5cf6" }}>10 Capabilities</span>{" "}
               <span className="text-gradient">That Don&apos;t Exist Anywhere Else</span>
             </h2>
             <div className="grid sm:grid-cols-2 gap-4">
@@ -424,7 +424,9 @@ export default function AboutPage() {
                 { n: "Evidence Grading", d: "A–D grades with confidence scores and PubMed citations" },
                 { n: "Cumulative Burden Scores", d: "Anticholinergic, sedation, QT. Validated clinical metrics." },
                 { n: "Deprescribing Optimizer", d: "Not a warning. A plan with substitutes and timelines." },
-                { n: "Integrated Pipeline", d: "All 8 capabilities orchestrated into one coherent report" },
+                { n: "Renal Dose Guidance", d: "CKD/eGFR-aware reduce, avoid, or monitor flags. Deterministic and rule-based." },
+                { n: "Geriatric Appropriateness", d: "Beers, STOPP, and START screening for inappropriate drugs and missing therapies." },
+                { n: "Integrated Pipeline", d: "All 10 capabilities orchestrated into one coherent report" },
               ].map((item, i) => (
                 <HoverRow key={i} title={item.n} description={item.d} index={i} />
               ))}
@@ -454,7 +456,7 @@ export default function AboutPage() {
               <StepCard
                 number={2}
                 title="AI Reasoning Pipeline"
-                description="ARIA's agent orchestrates 8 tools: RxNorm normalization, interaction detection, phenotype scoring, temporal modeling, evidence grading, and more."
+                description="ARIA's agent orchestrates 12 tools: RxNorm normalization, interaction detection, phenotype scoring, temporal modeling, evidence grading, renal dosing, geriatric appropriateness, and more."
                 color="#8b5cf6"
               />
             </RevealSection>
@@ -497,7 +499,7 @@ export default function AboutPage() {
               Built By
             </h2>
             <p style={{ color: "#94a8c8" }} className="text-sm">
-              One engineer. Three weeks. Eight clinical capabilities.
+              One engineer. Three weeks. Ten clinical capabilities.
             </p>
           </div>
 

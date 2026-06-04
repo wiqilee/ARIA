@@ -42,6 +42,8 @@ const capabilities = [
   { icon: "👤", title: "Patient Phenotype Scoring", desc: "Calculates personalized risk adjusted for age, kidney function, and clinical history." },
   { icon: "🕸", title: "N-Drug Interaction Graph", desc: "Detects emergent three-drug interactions that pairwise checkers miss entirely." },
   { icon: "📊", title: "Evidence Grading", desc: "Tags every alert with a confidence score and links to PubMed citations." },
+  { icon: "🫘", title: "Renal Dose Guidance", desc: "Flags drugs that need a dose reduction, avoidance, or monitoring for the patient's kidney function." },
+  { icon: "🩺", title: "Geriatric Appropriateness", desc: "Screens older adults against Beers, STOPP, and START to surface inappropriate drugs and missing therapies." },
   { icon: "💊", title: "Deprescribing Optimizer", desc: "Generates a prioritized plan with substitutions and expected risk reduction at each step." },
 ];
 
